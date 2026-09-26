@@ -38,9 +38,7 @@ OWNERSHIP
 - After you create shared/src/types.ts, never modify it.
 
 GIT
-- Stage only your own paths explicitly (e.g. `git add shared backend scripts package.json package-lock.json ...`). Never `git add -A` or `git add .`.
-- Commit after each numbered task below (more often is fine), with descriptive messages like "engine: legal moves and flips with tests".
-- If .git/index.lock exists, wait a few seconds and retry. Do not push.
+- You are never to commit to GIT. Instead let me know once you are done and I will review and commit/push manually. 
 
 PROMPT LOG
 - Create docs/ai-usage/01-backend-session.md. Paste this prompt verbatim at the top, and append every later prompt you receive in this session, verbatim.
@@ -122,8 +120,7 @@ PACKAGE
 - vite.config.ts: port 5173; proxy /api and /socket.io (ws: true) to http://localhost:3001; server.host: true; server.allowedHosts: true (needed for ngrok). This is config only and harmless before the backend exists.
 
 GIT
-- Stage only frontend/ and your log file explicitly. Never `git add -A` or `git add .`.
-- Commit after each numbered task below. If .git/index.lock exists, wait and retry. Do not push.
+- You are never to commit to GIT. Instead let me know once you are done and I will review and commit/push manually. 
 
 PROMPT LOG
 - Create docs/ai-usage/02-frontend-session.md. Paste this prompt verbatim at the top, and append every later prompt you receive in this session, verbatim.

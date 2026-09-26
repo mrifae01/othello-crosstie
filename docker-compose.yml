@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: othello
+      POSTGRES_PASSWORD: othello
+      POSTGRES_DB: othello
+    ports:
+      - "5433:5432"
+    volumes:
+      - othello-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U othello -d othello"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  othello-pgdata:
