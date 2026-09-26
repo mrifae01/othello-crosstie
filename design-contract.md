@@ -89,11 +89,13 @@ othello-crosstie/
 
 **Parallel-work mechanics**
 
-1. **Phase 0** (backend session, about 20 min, *before the frontend session starts*): root `package.json`, `tsconfig.base.json`, `docker-compose.yml`, the `shared/` package containing `types.ts` verbatim from §2 and `notation.ts`, and empty `backend/` and `frontend/` package.json stubs. Commit this to `main`.
-2. Then branch: `git worktree add ../othello-fe -b frontend` for the frontend session. The backend continues on branch `backend`.
-3. **Ownership is by directory.** The frontend session writes only under `frontend/`. The backend session writes everything else. Neither side edits `shared/src/types.ts` after Phase 0.
-4. Both branches will touch `package-lock.json`. At integration, resolve that by deleting it and re-running `npm install`.
-5. **Commit history is a graded deliverable.** Commit once per task-table row (at minimum) with a descriptive message such as `engine: legal moves + flips with tests`. Never squash. Merge branches with `git merge --no-ff` so the parallel work stays visible.
+Both sessions run **at the same time, in the same working tree, on `main`**, so the frontend sees `shared/` the moment the backend writes it.
+
+1. **Phase 0** (backend session, first ~20 min): root `package.json`, `tsconfig.base.json`, `docker-compose.yml`, `.gitignore`, `scripts/start.mjs`, and the `shared/` package with `types.ts` verbatim from §2 plus `notation.ts`. If `frontend/package.json` doesn't exist yet, the backend creates a minimal stub so the workspace resolves. Commit immediately.
+2. Until Phase 0 lands, the frontend writes source files that import `@othello/shared` as specified in §2, and holds off on `npm install`.
+3. **Ownership is by directory.** The frontend session writes only under `frontend/` (including `frontend/package.json` once it exists). The backend session writes everything else. Neither side edits `shared/src/types.ts` after Phase 0. The one shared file is `package-lock.json`: either session may regenerate it via `npm install`, and a failed install caused by a concurrent run should just be retried.
+4. **Commits are path-scoped.** Each session stages only its own paths (`git add frontend`, never `git add -A`). If `.git/index.lock` exists, wait and retry.
+5. **Commit history is a graded deliverable.** Commit once per task-table row (at minimum) with a descriptive message such as `engine: legal moves + flips with tests`. Never squash. The interleaved commits from the two sessions *are* the record of the parallel work.
 
 ---
 
@@ -549,7 +551,7 @@ Work in this order. **Items 1–4 cover the floor requirement.** Don't start ite
 
 ### 6.2 Frontend session: about 2h (it owns `frontend/` only)
 
-Start after the Phase 0 commit exists. **Build against mocks first.** Put hand-written `GameState` and `AnalysisResult` fixtures in `frontend/src/mocks/`, built with `initialBoard()` from shared, and use a `?mock=1` query flag. That way nothing waits on the backend.
+This session starts at the same time as the backend (see §1). **Build against mocks first, and don't wire the real backend until the backend reports its endpoints are ready.** All data access goes through a single `GameClient` interface in `frontend/src/data/`, with a mock implementation now and the real HTTP and socket implementation later. Fixtures live in `frontend/src/mocks/`. Once the real client exists, mocks stay reachable behind a `?mock=1` query flag. That way nothing waits on the backend.
 
 | # | Task | Est. |
 |---|---|---|
@@ -563,7 +565,7 @@ Start after the Phase 0 commit exists. **Build against mocks first.** Put hand-w
 
 ### 6.3 Integration pass: about 1h, both together
 
-1. Merge `backend` and `frontend` into `main` (`--no-ff`), regenerate `package-lock.json`, and confirm `npm install && npm start` works from a fresh clone. Test both the Docker path and the `DATABASE_URL` path.
+1. Confirm `npm install && npm start` works from a fresh clone (`git clone` into a temp dir). Test both the Docker path and the `DATABASE_URL` path.
 2. **Floor script:** in two separate tabs, create a game, join it, play to the end (including a pass if possible, which a scripted short game can force), and confirm the result is in Postgres (`psql` or `GET`). Repeat once with the second player joining through an ngrok URL.
 3. Watch analysis progress, open the review, and sanity-check that the classifications look plausible. Tune thresholds and depth if analysis takes more than about 30s or everything shows as a blunder.
 4. Edge cases: refresh mid-game (seat is kept), a spectator tab, an illegal or out-of-turn click (toast shown), resign, and restarting the server mid-game.

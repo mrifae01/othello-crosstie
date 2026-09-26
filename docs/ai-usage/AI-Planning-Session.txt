@@ -1,0 +1,1064 @@
+
+❯ <ide_opened_file>The user opened the file
+  /Users/mitchelrifae/Desktop/Repos/othello-crosstie/README.md in the IDE. This
+  may or may not be related to the current task.</ide_opened_file>
+
+❯ I'm building a take-home project: a full-stack Othello platform (TypeScript,
+  React, Node, Postgres) competing against an incumbent (eothello.com) that
+  already has multiplayer, an AI opponent, ratings, and a player base.
+
+  My chosen competitive edge: a post-game AI analysis/coaching layer — after
+  a match, evaluate every move with a minimax + alpha-beta engine, flag
+  blunders, show an eval swing over the course of the game, and suggest the
+  best move at each ply. Think chess.com's analysis board, but for Othello.
+
+  The floor requirement: two human players play a complete, rules-enforced
+  game from separate browser clients through my backend, results persist to
+  Postgres, full stack is TypeScript/React/Postgres, runs locally with
+  npm install / npm start.
+
+  I have ~8 hours total (including docs) and I'm splitting work across two
+  parallel coding sessions — one frontend, one backend — that will both work
+  from a shared contract doc so their output integrates cleanly.
+
+  Before any implementation, I want you to produce a single design doc
+  (design-contract.md) covering:
+
+  1. Shared TypeScript types: Board, Move, GameState, AnalysisResult, socket
+     event payloads
+  2. Postgres schema: games and moves tables, including columns for eval
+     scores, blunder flags, and best-move suggestions per ply
+  3. API/socket contract: exact events/endpoints the frontend will call and
+     what the backend returns
+  4. Engine module boundary: what lives in a shared engine package (rules,
+     legal moves, flip logic, heuristic eval, minimax search) vs. what's
+     backend-only glue code
+  5. A clear task split: everything the backend session owns vs. everything
+     the frontend session owns, sized to roughly 3 hours backend / 2 hours
+     frontend, with a shared 1-hour integration pass after
+  6. Explicitly flag anything you'd cut or defer to the roadmap given the
+     time budget, and why
+
+  Don't write implementation code yet — just the contract doc. I'll hand
+  this to two separate sessions afterward. Ask me anything you need
+  clarified before producing it.
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ The repo has empty backend/ and frontend/ folders and nothing else, so no
+  constraints yet. Four decisions change the contract in ways I can't safely
+  default:
+
+⏺ User answered Claude's questions:
+  ⎿  · How do two players find each other and start a game? → Invite link
+     (Recommended)
+     · How are players identified? → Anonymous + token (Recommended)
+     · When does post-game analysis run? → Auto on game end, stored
+     (Recommended)
+     · How should Postgres run locally for 'npm install / npm start'? → docker
+     compose (Recommended)
+
+⏺ All four answers match my recommendations. I'll write the contract now.
+
+⏺ Write(design-contract.md)
+  ⎿  Wrote 569 lines to design-contract.md
+      1 # Othello Crosstie — Design Contract
+      3 **Status:** frozen for implementation. Both sessions build agains
+         keep building to the contract, and log the issue in `docs/contra
+        ct-deviations.md` (what, why, proposed fix). We reconcile during
+      4
+        ia an invite link. When the game ends, the server analyzes every
+         eval graph, per-move classification (best → blunder), the best m
+        ove at each ply, and an accuracy score for each player.
+      7 ---
+      9 ## 0. Decisions already made
+     … +864 lines (ctrl+o to expand)
+
+⏺ Written for: the two coding sessions (backend and frontend) that will build
+  against it.
+
+  I've written the contract to design-contract.md, using the four answers you
+  gave: invite link, anonymous seat tokens, analysis that runs automatically
+  when a game ends and is stored, and docker compose for Postgres. No
+  implementation code is written yet.
+
+  A few decisions go beyond what you specified, so check these before you hand
+  it off:
+
+  - New shared/ package next to backend/ and frontend/. It holds the types and
+    the engine. Both apps import it as TypeScript source, so there's no build
+    step.
+  - Kickoff step ("Phase 0"). The backend session first sets up the project and
+    copies the shared types file word for word from the doc, then commits to
+    main before the frontend session starts. After that the types file is
+    frozen, and each session only writes in its own folders.
+  - The frontend never runs game rules. The server sends the legal moves with
+    every state update, and each analyzed move includes the board before and
+    after it. The frontend only imports types and a notation helper.
+  - Every eval is in "discs" from Black's point of view. The engine scores every
+    legal move at each turn, not just the best one, so it can measure exactly
+    how much worse the move actually played was. Blunder cut-offs are in discs
+    too. They are starting values, meant to be tuned when you integrate.
+  - Seat tokens live in sessionStorage, not localStorage. A refresh keeps your
+    seat, and two tabs in the same browser can play each other, which makes it
+    easier for a reviewer to demo.
+  - Passes are automatic. The server inserts a pass whenever a player has no
+    legal move, so clients never send one.
+  - Coaching tags field. Each analyzed move has a list of simple tags such as
+    "took corner" or "allowed corner". It can ship empty if the backend runs out
+    of time, and the frontend shows the tags only when they're there.
+
+  The doc also covers the database schema, REST endpoints and socket events, the
+  time-estimated task split, a cut/roadmap table, and a short list of risks.
+  Playing against the AI is the top roadmap item, because it's about 45 minutes
+  of work once the engine exists.
+
+  The biggest risk is analysis speed. A plain JavaScript engine searching 6
+  moves deep might take a few seconds per turn. The doc has the backend time one
+  real game early and fall back to a per-move time limit or a shallower search
+  if it's too slow.
+
+❯ Great now while I review that, here is the assignment pdf. Review what it is
+  asking and ensure that everything that is in the contract algins
+
+⏺ I'll check the incumbent's current features before judging the edge. If
+  eothello already offers post-game analysis, the contract's premise changes.
+
+⏺ Fetch(https://www.eothello.com/)
+  ⎿  Received 25KB (200 OK)
+
+⏺ Web Search("eothello game analysis engine review after game")
+  ⎿  Did 1 search in 5s
+
+⏺ eothello's homepage shows multiplayer, a leaderboard, tournaments and strategy
+  guides, and mentions nothing about post-game analysis. Now I'll update the
+  contract to cover the gaps the PDF exposes.
+
+⏺ Update(design-contract.md)
+  ⎿  Added 18 lines
+       6  
+       7  ---
+       8  
+       9 +## 0a. Why this edge (the business framing the build must suppo
+         +rt)                                                            
+      10 +                                                               
+      11 +The assignment grades *business sense*: whether the edge is rea
+         +l, whether the build supports it, and whether the roadmap and t
+         +he build tell the same story. So every build decision below tra
+         +ces back to one bet:                                           
+      12 +                                                               
+      13 +> **eothello is a place to *play* Othello. Crosstie is a place 
+         +to *get better* at Othello.**                                  
+      14 +                                                               
+      15 +eothello already covers multiplayer, an AI opponent, ratings, t
+         +ournaments and a player base, and we can't out-network an incum
+         +bent in 8 hours. Its public site has no post-game review, move 
+         +evaluation or blunder detection (checked 2026-09-26; re-verify 
+         +by hand before submitting). Strong analysis engines do exist (E
+         +dax, WZebra, SAIO), but they are separate desktop or mobile too
+         +ls. Our wedge is **coaching built into the place you play, with
+         + zero setup.**                                                 
+      16 +                                                               
+      17 +| Audience | Why they'd choose us | What in this build serves i
+         +t |                                                            
+      18 +|---|---|---|                                                  
+      19 +| Improving player | Every game becomes a lesson: where it turn
+         +ed, what you should have played, how accurate you were | Automa
+         +tic analysis, eval graph, blunder flags, best move per ply, acc
+         +uracy |                                                        
+      20 +| Club / coach | Review a student's game together from one link
+         + | Review pages are public URLs (`/game/:id/analysis`); spectat
+         +ing works via link |                                           
+      21 +| Tournament organizer | Annotated game records, and commentary
+         +-ready eval graphs for broadcast | Per-ply analysis stored in P
+         +ostgres (the seed of an archive); spectator mode |             
+      22 +                                                               
+      23 +What's cut (§7) is cut *because* it doesn't serve this bet: rat
+         +ings, lobby, clocks and accounts are all table stakes the incum
+         +bent already wins on.                                          
+      24 +                                                               
+      25 +---                                                            
+      26 +                                                               
+      27  ## 0. Decisions already made
+      28  
+      29  | Topic | Decision |
+
+⏺ Update(design-contract.md)
+  ⎿  Added 2 lines, removed 1 line
+      31  | Matchmaking | **Invite link.** Creator gets `/game/:id`, oppo
+          nent opens it and claims the White seat. No lobby, no queue. |
+      32  | Identity | **Anonymous + per-game seat token.** The player en
+          ters a display name, and the server returns a random `playerTok
+          en` for that seat. The client keeps it in `sessionStorage` unde
+          r `othello:seat:<gameId>`. A refresh keeps the seat, and a new 
+          tab or a different browser is a different player, so two tabs i
+          n one browser can play each other. The DB stores only a sha256 
+          of the token. |
+      33  | Analysis trigger | **Automatic on game end, persisted.** Resu
+          lts are written per ply into `moves`. Clients receive progress 
+          and ready events over the socket, and the analysis page reads o
+          ver REST. |
+      34 -| Local Postgres | **docker compose.** `npm start` brings up th
+         -e DB, runs migrations, then starts the API and web client. |   
+      34 +| Local Postgres | **docker compose by default, with a no-Docke
+         +r fallback.** `npm start` brings up the DB, runs migrations, th
+         +en starts the API and web client. If `DATABASE_URL` is set, Doc
+         +ker is skipped and that database is used. The assignment allows
+         + "clearly documented equivalents", and the README must document
+         + both paths. |                                                 
+      35 +| Remote second player | Supported via **ngrok (or similar) on 
+         +the Vite port 5173**. Vite proxies the API and websocket, so a 
+         +single tunnel URL is enough. The invite link is built from `win
+         +dow.location.origin`. |                                        
+      36  | Transport | **REST** for creating, joining and reading things
+          . **Socket.IO** for live game play and push events. The server 
+          is authoritative for all game rules. |
+      37  | Runtime | Node ≥ 20, TypeScript everywhere, npm workspaces, `
+          tsx` for the backend (no build step), Vite for the frontend. |
+      38  
+
+⏺ Update(design-contract.md)
+  ⎿  Added 6 lines, removed 1 line
+      46  ├── docker-compose.yml        # postgres:16-alpine, host port 5
+          433
+      47  ├── tsconfig.base.json
+      48  ├── design-contract.md        # this file
+      49 -├── docs/contract-deviations.md                                
+      49 +├── scripts/start.mjs         # npm start orchestration (see be
+         +low)                                                           
+      50 +├── docs/                                                      
+      51 +│   ├── contract-deviations.md                                 
+      52 +│   ├── design-notes.md       # deliverable: edge, architecture
+         +, decisions, trade-offs                                        
+      53 +│   ├── roadmap.md            # deliverable: milestones 2 & 3 (
+         +§7)                                                            
+      54 +│   └── ai-usage/             # deliverable: prompts saved verb
+         +atim, one file per session (§6.4)                              
+      55  ├── shared/                   # @othello/shared — types + pure 
+          engine. No I/O, no Node/DOM APIs.
+      56  │   ├── package.json          # "main": "src/index.ts", "types"
+          : "src/index.ts"  (consumed as TS source)
+      57  │   └── src/
+
+⏺ Update(design-contract.md)
+  ⎿  Added 1 line, removed 1 line
+      68  | Thing | Value |
+      69  |---|---|
+      70  | API + Socket.IO | `http://localhost:3001` (`PORT`) |
+      71 -| Vite dev server | `http://localhost:5173`, which proxies `/ap
+         -i` and `/socket.io` (ws) to 3001, so the frontend always uses r
+         -elative URLs |                                                 
+      71 +| Vite dev server | `http://localhost:5173`, which proxies `/ap
+         +i` and `/socket.io` (with `ws: true`) to 3001, so the frontend 
+         +always uses relative URLs. It also sets `server.host: true` and
+         + `server.allowedHosts: true`; without them Vite rejects ngrok's
+         + Host header. |                                                
+      72  | Postgres | `postgres://othello:othello@localhost:5433/othello
+          ` (`DATABASE_URL`). The backend falls back to this default, so 
+          no `.env` is required |
+      73  
+      74  **Root scripts (backend session owns)**
+
+⏺ Update(design-contract.md)
+  ⎿  Added 8 lines, removed 2 lines
+      74  **Root scripts (backend session owns)**
+      75  
+      76  ```jsonc
+      77 -"start":   "docker compose up -d --wait db && npm run migrate -
+         -w backend && concurrently -n api,web -c blue,magenta \"npm run 
+         -dev -w backend\" \"npm run dev -w frontend\"",                 
+      77 +"start":   "node scripts/start.mjs",                           
+      78  "test":    "npm test -w shared && npm test -w backend --if-pres
+          ent",
+      79  "db:reset":"docker compose down -v && docker compose up -d --wa
+          it db && npm run migrate -w backend"
+      80  ```
+      81  
+      82 -`docker-compose.yml` must define a `healthcheck` (`pg_isready`)
+         - so `--wait` works.                                            
+      82 +`scripts/start.mjs` works as follows:                          
+      83  
+      84 +1. If `DATABASE_URL` is unset, run `docker compose up -d --wait
+         + db`. If Docker isn't available, exit with a clear message expl
+         +aining how to set `DATABASE_URL` instead.                      
+      85 +2. Run `npm run migrate -w backend`.                           
+      86 +3. Run `concurrently -n api,web "npm run dev -w backend" "npm r
+         +un dev -w frontend"`.                                          
+      87 +                                                               
+      88 +`docker-compose.yml` must define a `healthcheck` (`pg_isready`)
+         + so `--wait` works. Target platform is macOS or Linux (the assi
+         +gnment says "Unix").                                           
+      89 +                                                               
+      90  **Parallel-work mechanics**
+      91  
+      92  1. **Phase 0** (backend session, about 20 min, *before the fron
+          tend session starts*): root `package.json`, `tsconfig.base.json
+          `, `docker-compose.yml`, the `shared/` package containing `type
+          s.ts` verbatim from §2 and `notation.ts`, and empty `backend/` 
+          and `frontend/` package.json stubs. Commit this to `main`.
+
+⏺ Update(design-contract.md)
+  ⎿  Added 1 line
+      93  2. Then branch: `git worktree add ../othello-fe -b frontend` fo
+          r the frontend session. The backend continues on branch `backen
+          d`.
+      94  3. **Ownership is by directory.** The frontend session writes o
+          nly under `frontend/`. The backend session writes everything el
+          se. Neither side edits `shared/src/types.ts` after Phase 0.
+      95  4. Both branches will touch `package-lock.json`. At integration
+          , resolve that by deleting it and re-running `npm install`.
+      96 +5. **Commit history is a graded deliverable.** Commit once per 
+         +task-table row (at minimum) with a descriptive message such as 
+         +`engine: legal moves + flips with tests`. Never squash. Merge b
+         +ranches with `git merge --no-ff` so the parallel work stays vis
+         +ible.                                                          
+      97  
+      98  ---
+      99  
+
+⏺ Next I'll update the integration pass, add a deliverables section, and reframe
+  the roadmap around the milestones the assignment names.
+
+⏺ Update(design-contract.md)
+  ⎿  Added 2 lines, removed 2 lines
+      563  
+      564  ### 6.3 Integration pass: about 1h, both together
+      565  
+      566 -1. Merge `backend` and `frontend` into `main`, regenerate `pac
+          -kage-lock.json`, and confirm `npm start` works from a fresh cl
+          -one.                                                          
+      567 -2. **Floor script:** in two separate tabs, create a game, join
+          - it, play to the end (including a pass if possible, which a sc
+          -ripted short game can force), and confirm the result is in Pos
+          -tgres (`psql` or `GET`).                                      
+      566 +1. Merge `backend` and `frontend` into `main` (`--no-ff`), reg
+          +enerate `package-lock.json`, and confirm `npm install && npm s
+          +tart` works from a fresh clone. Test both the Docker path and 
+          +the `DATABASE_URL` path.                                      
+      567 +2. **Floor script:** in two separate tabs, create a game, join
+          + it, play to the end (including a pass if possible, which a sc
+          +ripted short game can force), and confirm the result is in Pos
+          +tgres (`psql` or `GET`). Repeat once with the second player jo
+          +ining through an ngrok URL.                                   
+      568  3. Watch analysis progress, open the review, and sanity-check 
+           that the classifications look plausible. Tune thresholds and d
+           epth if analysis takes more than about 30s or everything shows
+            as a blunder.
+      569  4. Edge cases: refresh mid-game (seat is kept), a spectator ta
+           b, an illegal or out-of-turn click (toast shown), resign, and 
+           restarting the server mid-game.
+      570  5. Resolve `docs/contract-deviations.md`, then write the READM
+           E (setup, architecture sketch, engine notes, roadmap from §7).
+
+⏺ Update(design-contract.md)
+  ⎿  Added 15 lines, removed 2 lines
+      567  2. **Floor script:** in two separate tabs, create a game, join
+            it, play to the end (including a pass if possible, which a sc
+           ripted short game can force), and confirm the result is in Pos
+           tgres (`psql` or `GET`). Repeat once with the second player jo
+           ining through an ngrok URL.
+      568  3. Watch analysis progress, open the review, and sanity-check 
+           that the classifications look plausible. Tune thresholds and d
+           epth if analysis takes more than about 30s or everything shows
+            as a blunder.
+      569  4. Edge cases: refresh mid-game (seat is kept), a spectator ta
+           b, an illegal or out-of-turn click (toast shown), resign, and 
+           restarting the server mid-game.
+      570 -5. Resolve `docs/contract-deviations.md`, then write the READM
+          -E (setup, architecture sketch, engine notes, roadmap from §7).
+      570 +5. Resolve `docs/contract-deviations.md`.                     
+      571  
+      572 -Remaining budget: about 2h of the 8h for this design, docs, an
+          -d a buffer.                                                   
+      572 +Remaining budget: about 2h of the 8h, for this design, the wri
+          +tten deliverables in §6.4, and a buffer. **The written deliver
+          +ables are graded as heavily as the code, so don't let integrat
+          +ion eat that time.**                                          
+      573  
+      574 +### 6.4 Written deliverables (you, with AI assistance; about 1
+          +.5h, after integration)                                       
+      575 +                                                              
+      576 +The assignment requires all of these in the repo:             
+      577 +                                                              
+      578 +| File | Contents |                                           
+      579 +|---|---|                                                     
+      580 +| `README.md` | Prerequisites (Node ≥ 20, Docker *or* a Postgr
+          +es URL). `npm install && npm start`. How to play two-player on
+          + one machine (two tabs) and remotely (ngrok on 5173). How to r
+          +un tests. **"Steps I took"**: a short chronological narrative 
+          +of how the work was done. |                                   
+      581 +| `docs/design-notes.md` | The competitive edge and why (expan
+          +d §0a, including what you observed on eothello). Architecture 
+          +diagram: shared engine / backend glue / frontend. Key decision
+          +s and trade-offs, summarizing §0 plus the "why" behind server-
+          +authoritative rules, whole-state broadcasts, analysis stored p
+          +er ply, and in-process analysis. |                            
+      582 +| `docs/roadmap.md` | Milestone 2 and Milestone 3, built from 
+          +§7, including what you ran out of time for and where it plugs 
+          +into the existing code. Leave genuinely open questions open. |
+      583 +| `docs/ai-usage/` | `00-design-contract.md` (this conversatio
+          +n's prompts), `01-backend-session.md`, `02-frontend-session.md
+          +`, `03-integration.md`. Save each prompt verbatim, and add a l
+          +ine on what you accepted, corrected or rejected and why. That 
+          +line is what shows "whether you understand what it produced". 
+          +|                                                             
+      584 +                                                              
+      585 +**Instruction to both sessions:** append every prompt you rece
+          +ive, verbatim, to your `docs/ai-usage/0N-*.md` file as you go,
+          + rather than reconstructing them at the end. Each session writ
+          +es only its own file.                                         
+      586 +                                                              
+      587  ---
+      588  
+      589  ## 7. Cut or deferred to the roadmap
+
+⏺ Now the roadmap section. I'm adding milestone framing on top of the existing
+  cut table.
+
+⏺ Update(design-contract.md)  ⎿  Added 19 lines
+      588  
+      589  ## 7. Cut or deferred to the roadmap
+      590  
+      591 +### 7.1 Milestone framing (the skeleton for `docs/roadmap.md`)
+      592 +                                                              
+      593 +The assignment asks for milestones 2 and 3, named as "world to
+          +urnament scale" and "historical recordkeeping". Each one exten
+          +ds what this build already has:                               
+      594 +                                                              
+      595 +**Milestone 1: this build.** Rules-enforced two-player games, 
+          +persisted results, and automatic per-ply engine analysis with 
+          +a shareable review page.                                      
+      596 +                                                              
+      597 +**Milestone 2: Coaching across games (identity + historical re
+          +cordkeeping).**                                               
+      598 +- Accounts replace seat tokens: a `players` table, and `games.
+          +black_player_id` / `white_player_id` replace the `*_token_hash
+          +` columns. Existing anonymous games stay readable.            
+      599 +- Because analysis is already stored per ply in `moves`, cross
+          +-game coaching is **just SQL over existing rows**. For example
+          +: "you play X-squares 3× more than players at your level", acc
+          +uracy trend over time, and puzzles mined from your own blunder
+          +s (positions where `is_blunder` is true and `best_square` is t
+          +he answer).                                                   
+      600 +- Also in this milestone: an AI opponent (§7.2 row 1), ratings
+          +, and game import/export in standard transcript notation (e.g.
+          + `f5d6c3…`) so historical games from other sources can be anal
+          +yzed too. That feeds archive building.                        
+      601 +                                                              
+      602 +**Milestone 3: World tournament scale.**                      
+      603 +- Tournament entities (`tournaments`, `rounds`, `pairings` ref
+          +erencing `games`), pairing systems (Swiss is the Othello stand
+          +ard), clocks, and abandonment rules.                          
+      604 +- Live broadcast: spectator rooms already exist, and adding a 
+          +live eval bar for **spectators only** (never players) is comme
+          +ntary-grade content that eothello lacks.                      
+      605 +- Infra: bitboard engine plus a worker or job-queue analysis t
+          +ier, the Socket.IO Redis adapter, and read replicas for the ar
+          +chive.                                                        
+      606 +- **Open questions (leave these open):** Do we federate with t
+          +he World Othello Federation's rating system, or run our own? W
+          +hat anti-cheat applies to engine-assisted online tournament pl
+          +ay? And is the analysis engine eventually a paid tier, or a fr
+          +ee acquisition hook?                                          
+      607 +                                                              
+      608 +### 7.2 What's cut from this build, and why                   
+      609 +                                                              
+      610  | Item | Why it's cut | Roadmap note |
+      611  |---|---|---|
+      612  | **Play vs. AI opponent** | The incumbent already has one, so
+            it isn't our edge, and it's not in the floor requirement. | *
+           *First roadmap item.** It's cheap once the engine exists: roug
+           hly 45 min for the server to play `search().best` as White. |
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(sed -i '' 's/^## 0\. Decisions already made/## 0b. Decisions already
+      made/; s/Add a `users` table later and move the `\*_token_hash` columns to
+      `user_id` foreig…)
+  ⎿  Updated design-contract.md (+2 -2)
+      24  
+      25  ---
+      26  
+      27 -## 0. Decisions already made                                   
+      27 +## 0b. Decisions already made                                  
+      28  
+      29  | Topic | Decision |
+      30  |---|---|
+     ...
+      610  | Item | Why it's cut | Roadmap note |
+      611  |---|---|---|
+      612  | **Play vs. AI opponent** | The incumbent already has one, so
+            it isn't our edge, and it's not in the floor requirement. | *
+           *First roadmap item.** It's cheap once the engine exists: roug
+           hly 45 min for the server to play `search().best` as White. |
+      613 -| Accounts, auth, ratings/ELO, player profiles | About 1.5h or
+          - more, and it would take time away from the differentiator. Se
+          -at tokens are enough to prove multiplayer. | Add a `users` tab
+          -le later and move the `*_token_hash` columns to `user_id` fore
+          -ign keys. |                                                   
+      613 +| Accounts, auth, ratings/ELO, player profiles | About 1.5h or
+          + more, and it would take time away from the differentiator. Se
+          +at tokens are enough to prove multiplayer. | Milestone 2 (§7.1
+          +): a `players` table, with `*_player_id` foreign keys replacin
+          +g the `*_token_hash` columns. |                               
+      614  | Lobby, matchmaking queue | An invite link covers the demo, a
+           nd a queue is hard to demo when testing alone. | — |
+      615  | Clocks and time controls, abandonment and disconnect handlin
+           g, presence indicators | Each one adds server timers and edge 
+           cases. Resign covers the "I'm leaving" case. | A game whose pl
+           ayer leaves stays `active` forever. That is a known limitation
+            and gets documented. |
+      616  | Rematch, chat, spectator list UI | Nice-to-haves with no flo
+           or or differentiation value. Spectating already works via the 
+           link. | — |
+
+⏺ Most of the contract already matched the assignment, so I didn't change the
+  core design. I patched eight gaps in design-contract.md, plus a small cleanup
+  to section numbering and wording.
+
+  Already aligned
+  - Working game: the server enforces the rules, two separate browser clients
+    play through the backend, and a complete game runs to the end, including
+    passes.
+  - Results in Postgres: every game and every move is saved.
+  - Tech stack: TypeScript, React and Postgres throughout.
+  - Build what supports the edge, cut what doesn't: the plan focuses on analysis
+    and the cut table explains why each item was dropped.
+  - Code that can absorb change: the pure engine package keeps rules separate
+    from the server and database code.
+
+  Gaps fixed
+
+  What the assignment says: Business sense is "the core of what we evaluate"
+  What was wrong: The doc never explained why analysis is the edge, or who would
+
+  switch to us
+  Fix: New §0a: the positioning ("eothello is where you play; Crosstie is where
+  you get better"), plus a table of what players, clubs/coaches and tournament
+  organizers each get from this build
+  ────────────────────────────────────────
+  What the assignment says: Runs with npm install / npm start "or clearly
+  documented equivalents"
+  What was wrong: Hard dependency on Docker
+  Fix: scripts/start.mjs skips Docker when DATABASE_URL is set, and the README
+  must document both paths
+  ────────────────────────────────────────
+  What the assignment says: Remote play via ngrok
+  What was wrong: Vite blocks unknown host names by default, so an ngrok link
+  would fail
+  Fix: Vite is set to accept any host and proxy websockets, so one tunnel on
+  port
+  5173 is enough
+  ────────────────────────────────────────
+  What the assignment says: Written deliverables
+  What was wrong: Only the README was mentioned
+  Fix: New §6.4: README with a "steps I took" section, docs/design-notes.md,
+  docs/roadmap.md, docs/ai-usage/, with about 1.5h reserved
+  ────────────────────────────────────────
+  What the assignment says: Prompts saved in the repo
+  What was wrong: Not planned
+  Fix: Each session appends its prompts verbatim to its own docs/ai-usage/ file
+  as it works, plus a note on what was accepted or corrected
+  ────────────────────────────────────────
+  What the assignment says: Meaningful commit history
+  What was wrong: Not addressed
+  Fix: One commit per task row, no squashing, --no-ff merges so the parallel
+  work
+  stays visible
+  ────────────────────────────────────────
+  What the assignment says: Roadmap to milestone 2 (historical recordkeeping)
+  and
+  3 (world tournament scale), with open questions left open
+  What was wrong: The roadmap was just a cut list
+  Fix: New §7.1 with milestone framing. Milestone 2's cross-game coaching is SQL
+
+  over the per-move analysis we already store, so the build and the roadmap
+  tell one story. Three open questions are left open.
+  ────────────────────────────────────────
+  What the assignment says: Keep ngrok and the remote path tested
+  What was wrong: Only testing in two local tabs
+  Fix: Integration step 2 also tests a second player joining via ngrok, and the
+  fresh-clone check covers both database paths
+
+  Decision for you: "Continue from your live-session repo — keep the history."
+  This repo has a single "Initial commit" with empty backend/ and frontend/
+  folders. If that's the live-session repo, we're fine. If the live session
+  produced code somewhere else, the contract's setup step (which starts from
+  scratch) should instead build on that code. Let me know, because it changes
+  the backend session's first 20 minutes.
+
+  Check by hand: eothello's homepage mentions multiplayer, a leaderboard,
+  tournaments and strategy guides, but nothing about post-game analysis. I only
+  checked the homepage, so open a finished game there before you claim this in
+  the design notes. Standalone Othello analysis tools such as Edax and SAIO do
+  exist. The contract frames the edge as coaching built into the place you play,
+  with no setup, not as the first analysis tool ever.
+
+  Sources:
+  - eOthello (https://www.eothello.com/)
+  - World Othello Federation – Analyze SAIO
+    (https://www.worldothello.org/news/131/analyze-saio)
+
+❯ /usage-credits
+  ⎿  Browser opened to manage usage credits. If it didn't open, visit: https://claude.ai/settings/usage?from=cc_cli_limit_message
+
+❯ Ok great now create the repo folder layout with just blank folders for now.
+  Include .gitkeep files so that I can push the structure to git as my first
+  inital push
+
+⏺ Bash(for d in \
+        shared/src/engine \…)
+  ⎿  Created backend/migrations/.gitkeep (+0 -0)
+  ⎿  Created backend/src/analysis/.gitkeep (+0 -0)
+  ⎿  Created backend/src/db/.gitkeep (+0 -0)
+  ⎿  Created backend/src/game/.gitkeep (+0 -0)
+  ⎿  Created backend/src/http/.gitkeep (+0 -0)
+  ⎿  … 7 more files changed
+
+⏺ I created the folder layout from the contract, with a .gitkeep in each empty
+  folder so git will track them:
+
+  shared/src/engine/
+  backend/src/{db,game,analysis,http,socket}/
+  backend/migrations/
+  frontend/src/{components,pages,mocks}/
+  scripts/
+  docs/ai-usage/
+
+  Parent folders like backend/src/ don't need their own .gitkeep, because git
+  tracks them through the folders inside. I didn't create any files beyond the
+  .gitkeeps.
+
+  design-contract.md is also untracked right now, so it will go into this first
+  push along with the folders. Nothing is committed yet. When you're ready:
+
+  git add -A && git commit -m "Scaffold repo layout and add design contract" &&
+  git push
+
+❯ Great, now since I am using a completely new laptop. I need you to check to
+  see what I have installed and what I need to install in order to run all of
+  our requirements. Anything that needs to be added, like maybe docker desktop,
+  outside of my IDE, just note it down and assume I have it
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ This laptop only has git and Apple's Command Line Tools ready to go. Node
+  isn't installed at all, and Docker Desktop is installed but not set up yet. I
+  didn't install anything.
+
+  What I found (Apple Silicon Mac, macOS 26.6)
+
+  ┌────────────┬───────────────────────────────┬────────────────────────────┐
+  │    Tool    │            Status             │         Needed for         │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │ git 2.50.1 │ ✅ Installed (Apple's         │ Commits and pushing        │
+  │            │ version)                      │                            │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │ Xcode      │                               │ Building native npm        │
+  │ Command    │ ✅ Installed                  │ packages                   │
+  │ Line Tools │                               │                            │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │ Node.js +  │ ❌ Not installed, and no Node │ Everything: npm install,   │
+  │ npm        │  version manager (nvm, fnm,   │ npm start, the backend and │
+  │            │ volta)                        │  frontend                  │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │            │ ⚠️ The app is in              │                            │
+  │ Docker     │ /Applications, but the docker │ Postgres for npm start     │
+  │ Desktop    │  command isn't on your PATH   │                            │
+  │            │ and Docker isn't running      │                            │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │ Homebrew   │ ❌ Not installed              │ Optional, just the easiest │
+  │            │                               │  way to install the rest   │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │            │                               │ Optional, only for testing │
+  │ ngrok      │ ❌ Not installed              │  a second player on        │
+  │            │                               │ another machine            │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │            │                               │ Optional, only for looking │
+  │ psql       │ ❌ Not installed              │  at the database directly. │
+  │            │                               │  docker compose exec db    │
+  │            │                               │ psql works instead.        │
+  ├────────────┼───────────────────────────────┼────────────────────────────┤
+  │ gh (GitHub │ ❌ Not installed              │ Optional. Plain git push   │
+  │  CLI)      │                               │ works without it.          │
+  └────────────┴───────────────────────────────┴────────────────────────────┘
+
+  None of the ports we use (3001, 5173, 5433) are taken.
+
+  To install, outside your IDE
+
+  1. Node.js 22 LTS, which includes npm. Either install it from nodejs.org, or
+     run brew install fnm && fnm install 22 for a version manager. The contract
+     needs Node 20 or newer.
+  2. Open Docker Desktop once and finish its setup. Until you do, the docker
+     command isn't available and Docker isn't running. Afterwards, check with
+     docker compose version.
+  3. Optional: Homebrew, ngrok (plus a free account and auth token), libpq for
+     psql, and gh.
+
+  I'll assume from here on that Node 22 and a running Docker Desktop are both
+  available.
+
+  When you write the README's Prerequisites section, list Node 20 or newer plus
+  either Docker Desktop or your own Postgres URL. A reviewer on a fresh laptop
+  will hit exactly these gaps.
+
+❯ ok while I install everything, can you clean up the README? no need to add
+  any information to it, instead just clean up the formatting and leave room
+  for me to add aditional notes, sessions, etc
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ The README is currently just the title, so there's nothing to reformat. I'll
+  give it a skeleton of empty sections with placeholders and no new content.
+
+⏺ Write(README.md)
+  ⎿  Added 55 lines, removed 8 lines
+       1  # othello-crosstie
+       2  
+       3 -Working sessions:                                              
+       3 +<!-- One-line summary -->                                      
+       4  
+       5 -1. 9/26 9:30AM -                                               
+       6 -Goal: complete artitecture plan and begin implementation on fun
+         -dational project of the game.                                  
+       5 +---                                                            
+       6  
+       8 -Overall Time Budget Plan:                                      
+       9 -30-45 mins of solo planning with claude                        
+       7 +## Contents                                                    
+       8  
+      11 -3-4 hours of creating the actual game ensureing the fundations 
+         -work.                                                          
+       9 +- [Prerequisites](#prerequisites)                              
+      10 +- [Setup & Run](#setup--run)                                   
+      11 +- [Playing a Game](#playing-a-game)                            
+      12 +- [Testing](#testing)                                          
+      13 +- [Project Structure](#project-structure)                      
+      14 +- [Steps I Took](#steps-i-took)                                
+      15 +- [Sessions](#sessions)                                        
+      16 +- [Documentation](#documentation)                              
+      17 +- [Notes](#notes)                                              
+      18  
+      13 -1-2 hrs to work on "the competetive edge"                      
+      19 +---                                                            
+      20  
+      15 -30-1hr on final documtation                                    
+      21 +## Prerequisites                                               
+      22  
+      23 +<!-- TODO -->                                                  
+      24 +                                                               
+      25 +## Setup & Run                                                 
+      26 +                                                               
+      27 +<!-- TODO -->                                                  
+      28 +                                                               
+      29 +## Playing a Game                                              
+      30 +                                                               
+      31 +<!-- TODO -->                                                  
+      32 +                                                               
+      33 +## Testing                                                     
+      34 +                                                               
+      35 +<!-- TODO -->                                                  
+      36 +                                                               
+      37 +## Project Structure                                           
+      38 +                                                               
+      39 +<!-- TODO -->                                                  
+      40 +                                                               
+      41 +---                                                            
+      42 +                                                               
+      43 +## Steps I Took                                                
+      44 +                                                               
+      45 +<!-- TODO: chronological narrative of how the work was done -->
+      46 +                                                               
+      47 +## Sessions                                                    
+      48 +                                                               
+      49 +<!-- TODO: one entry per working session -->                   
+      50 +                                                               
+      51 +### Session 1 —                                                
+      52 +                                                               
+      53 +<!-- TODO -->                                                  
+      54 +                                                               
+      55 +---                                                            
+      56 +                                                               
+      57 +## Documentation                                               
+      58 +                                                               
+      59 +<!-- TODO: links to design contract, design notes, roadmap, AI 
+         +usage -->                                                      
+      60 +                                                               
+      61 +## Notes                                                       
+      62 +                                                               
+      63 +<!-- TODO -->                                                  
+
+⏺ I've laid out README.md as a skeleton. It keeps the existing #
+  othello-crosstie title, adds a table of contents, and has empty sections that
+  each hold an invisible <!-- TODO --> comment for you to replace. I didn't add
+  any new information.
+
+  - Running the project: Prerequisites, Setup & Run, Playing a Game, Testing,
+    Project Structure.
+  - How you worked: Steps I Took, and Sessions, with a blank ### Session 1 —
+    heading to copy for each session.
+  - Extras: Documentation, for links to the contract, design notes, roadmap and
+    AI usage folder, and a free-form Notes section.
+
+  The section names follow what the assignment asks the README to cover. Rename
+  or reorder them however you like.
+
+❯ You remove the information and goals I had for planning and session 1
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Git only has the one-line version. VS Code keeps its own local file history,
+  so I'll look there.
+
+  Listed 2 directories, ran 1 shell command (ctrl+o to expand)
+
+⏺ Found it. VS Code saved a snapshot of your version at 9:57, after I had read
+  the file. I'll put your content back into the new layout, keeping your wording
+  and changing only the formatting.
+
+⏺ Update(README.md)
+  ⎿  Added 2 lines, removed 1 line
+      12  - [Testing](#testing)
+      13  - [Project Structure](#project-structure)
+      14  - [Steps I Took](#steps-i-took)
+      15 -- [Sessions](#sessions)                                        
+      15 +- [Overall Time Budget Plan](#overall-time-budget-plan)        
+      16 +- [Working Sessions](#working-sessions)                        
+      17  - [Documentation](#documentation)
+      18  - [Notes](#notes)
+      19  
+
+⏺ Update(README.md)
+  ⎿  Added 16 lines, removed 3 lines
+      45  
+      46  <!-- TODO: chronological narrative of how the work was done -->
+      47  
+      48 -## Sessions                                                    
+      48 +## Overall Time Budget Plan                                    
+      49  
+      50 -<!-- TODO: one entry per working session -->                   
+      50 +| Time | Focus |                                               
+      51 +|---|---|                                                      
+      52 +| 30–45 mins | Solo planning with Claude |                     
+      53 +| 3–4 hours | Creating the actual game, ensuring the foundation
+         +s work |                                                       
+      54 +| 1–2 hrs | Working on "the competitive edge" |                
+      55 +| 30 mins–1 hr | Final documentation |                         
+      56  
+      52 -### Session 1 —                                                
+      57 +## Working Sessions                                            
+      58  
+      59 +### Session 1 — 9/26, 9:30 AM                                  
+      60 +                                                               
+      61 +**Goal:** Complete architecture plan and begin implementation o
+         +n foundational project of the game.                            
+      62 +                                                               
+      63 +<!-- TODO: notes / outcome -->                                 
+      64 +                                                               
+      65 +### Session 2 —                                                
+      66 +                                                               
+      67  <!-- TODO -->
+      68  
+      69  ---
+
+⏺ Sorry about that. The file only had the title when I read it, and your
+  planning notes were saved to disk just before I overwrote it. I recovered them
+  from VS Code's local file history and put them back into README.md:
+
+  - Overall Time Budget Plan: your four time blocks, now in a table.
+  - Working Sessions → Session 1, 9/26, 9:30 AM: your goal, with a placeholder
+    for notes, plus a blank Session 2 heading to fill in next.
+
+  Your wording is unchanged except that I fixed some typos: "artitecture",
+  "fundational", "ensureing", "competetive", "documtation".
+
+  Next time I'll re-read a file right before overwriting it, in case you've just
+  edited it.
+
+❯ Great now that planning is complete, give me prompts to run in both backend
+  and frontend sessions.
+
+  I plan on running the concurrently, and since the frontend will rely on some
+  of the backend to be built, prompt the frontend to do what it can without
+  wiring in the endpoints until prompted that the backend endpoints are
+  implemented
+
+⏺ I'll write these as six prompts in run order: three for the backend and three
+  for the frontend, with checkpoints so you can pass the backend's "ready"
+  report to the frontend. First I need to update one part of the contract. It
+  assumed the frontend would start after the backend's setup step, on a separate
+  branch. Since you're running both at once, both sessions need to share one
+  working tree instead.
+
+⏺ Update(design-contract.md)
+  ⎿  Added 7 lines, removed 5 lines
+       89  
+       90  **Parallel-work mechanics**
+       91  
+       92 -1. **Phase 0** (backend session, about 20 min, *before the fro
+          -ntend session starts*): root `package.json`, `tsconfig.base.js
+          -on`, `docker-compose.yml`, the `shared/` package containing `t
+          -ypes.ts` verbatim from §2 and `notation.ts`, and empty `backen
+          -d/` and `frontend/` package.json stubs. Commit this to `main`.
+       93 -2. Then branch: `git worktree add ../othello-fe -b frontend` f
+          -or the frontend session. The backend continues on branch `back
+          -end`.                                                         
+       94 -3. **Ownership is by directory.** The frontend session writes 
+          -only under `frontend/`. The backend session writes everything 
+          -else. Neither side edits `shared/src/types.ts` after Phase 0. 
+       95 -4. Both branches will touch `package-lock.json`. At integratio
+          -n, resolve that by deleting it and re-running `npm install`.  
+       96 -5. **Commit history is a graded deliverable.** Commit once per
+          - task-table row (at minimum) with a descriptive message such a
+          -s `engine: legal moves + flips with tests`. Never squash. Merg
+          -e branches with `git merge --no-ff` so the parallel work stays
+          - visible.                                                     
+       92 +Both sessions run **at the same time, in the same working tree
+          +, on `main`**, so the frontend sees `shared/` the moment the b
+          +ackend writes it.                                             
+       93  
+       94 +1. **Phase 0** (backend session, first ~20 min): root `package
+          +.json`, `tsconfig.base.json`, `docker-compose.yml`, `.gitignor
+          +e`, `scripts/start.mjs`, and the `shared/` package with `types
+          +.ts` verbatim from §2 plus `notation.ts`. If `frontend/package
+          +.json` doesn't exist yet, the backend creates a minimal stub s
+          +o the workspace resolves. Commit immediately.                 
+       95 +2. Until Phase 0 lands, the frontend writes source files that 
+          +import `@othello/shared` as specified in §2, and holds off on 
+          +`npm install`.                                                
+       96 +3. **Ownership is by directory.** The frontend session writes 
+          +only under `frontend/` (including `frontend/package.json` once
+          + it exists). The backend session writes everything else. Neith
+          +er side edits `shared/src/types.ts` after Phase 0. The one sha
+          +red file is `package-lock.json`: either session may regenerate
+          + it via `npm install`, and a failed install caused by a concur
+          +rent run should just be retried.                              
+       97 +4. **Commits are path-scoped.** Each session stages only its o
+          +wn paths (`git add frontend`, never `git add -A`). If `.git/in
+          +dex.lock` exists, wait and retry.                             
+       98 +5. **Commit history is a graded deliverable.** Commit once per
+          + task-table row (at minimum) with a descriptive message such a
+          +s `engine: legal moves + flips with tests`. Never squash. The 
+          +interleaved commits from the two sessions *are* the record of 
+          +the parallel work.                                            
+       99 +                                                              
+      100  ---
+      101  
+      102  ## 2. Shared TypeScript types — `shared/src/types.ts`
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(sed -i '' '568s/.*/1. Confirm `npm install \&\& npm start` works from a
+      fresh clone (`git clone` into a temp dir). Test both the Docker path and
+      the `DATABASE_U…)
+  ⎿  Updated design-contract.md (+1 -1)
+      565  
+      566  ### 6.3 Integration pass: about 1h, both together
+      567  
+      568 -1. Merge `backend` and `frontend` into `main` (`--no-ff`), reg
+          -enerate `package-lock.json`, and confirm `npm install && npm s
+          -tart` works from a fresh clone. Test both the Docker path and 
+          -the `DATABASE_URL` path.                                      
+      568 +1. Confirm `npm install && npm start` works from a fresh clone
+          + (`git clone` into a temp dir). Test both the Docker path and 
+          +the `DATABASE_URL` path.                                      
+      569  2. **Floor script:** in two separate tabs, create a game, join
+            it, play to the end (including a pass if possible, which a sc
+           ripted short game can force), and confirm the result is in Pos
+           tgres (`psql` or `GET`). Repeat once with the second player jo
+           ining through an ngrok URL.
+      570  3. Watch analysis progress, open the review, and sanity-check 
+           that the classifications look plausible. Tune thresholds and d
+           epth if analysis takes more than about 30s or everything shows
+            as a blunder.
+      571  4. Edge cases: refresh mid-game (seat is kept), a spectator ta
+           b, an illegal or out-of-turn click (toast shown), resign, and 
+           restarting the server mid-game.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(design-contract.md)
+  ⎿  Added 1 line, removed 1 line
+      551  
+      552  ### 6.2 Frontend session: about 2h (it owns `frontend/` only)
+      553  
+      554 -Start after the Phase 0 commit exists. **Build against mocks f
+          -irst.** Put hand-written `GameState` and `AnalysisResult` fixt
+          -ures in `frontend/src/mocks/`, built with `initialBoard()` fro
+          -m shared, and use a `?mock=1` query flag. That way nothing wai
+          -ts on the backend.                                            
+      554 +This session starts at the same time as the backend (see §1). 
+          +**Build against mocks first, and don't wire the real backend u
+          +ntil the backend reports its endpoints are ready.** All data a
+          +ccess goes through a single `GameClient` interface in `fronten
+          +d/src/data/`, with a mock implementation now and the real HTTP
+          + and socket implementation later. Fixtures live in `frontend/s
+          +rc/mocks/`. Once the real client exists, mocks stay reachable 
+          +behind a `?mock=1` query flag. That way nothing waits on the b
+          +ackend.                                                       
+      555  
+      556  | # | Task | Est. |
+      557  |---|---|---|
+⏺ Now the prompts file:
+
+⏺ Write(docs/ai-usage/session-prompts.md)
+  ⎿  Wrote 220 lines to docs/ai-usage/session-prompts.md
+       1 # Session Prompts
+       2
+         sions run concurrently in the same working tree on `main`, as `d
+         esign-contract.md` §1 describes.
+       4
+       6
+       7 ```
+       8  BACKEND                                  FRONTEND
+      10  B1  Phase 0 → rules → DB → game flow      F1  Scaffold + all UI
+          against mocks
+     … +393 lines (ctrl+o to expand)
+
+⏺ Written for: the backend and frontend Claude Code sessions, with you passing
+  reports between them.
+
+  The prompts are in docs/ai-usage/session-prompts.md, in copy-paste blocks. The
+  file sits in the AI-usage folder, so it also counts toward that deliverable.
+
+  Run order
+  1. Start B1 (backend) and F1 (frontend) at the same time.
+  2. When B1 finishes, paste its "BACKEND PART 1 READY" report into F2 and send
+     F2 to the frontend session. At the same time, send B2 to the backend
+     session.
+  3. When B2 finishes, paste its report into F3 and send F3 to the frontend
+     session.
+  4. Last, the Integration prompt, in a fresh session or the backend one.
+
+  How the prompts handle running both at once
+  - Frontend waits for the backend's setup. F1 writes code importing
+    @othello/shared but doesn't run npm install until the backend's root
+    package.json exists, which takes about 20 minutes. It never creates its own
+    copy of the types.
+  - No real backend until you say so. F1 builds every screen through a single
+    GameClient interface with an in-memory mock. The real HTTP and socket client
+    isn't written until F2, when you paste in the backend's report. Mocks stay
+    available behind ?mock=1.
+  - Mock games play for real. Once the backend commits rules.ts, the mock uses
+    the shared engine to play real moves. UI components still use only
+    state.legalMoves.
+  - Clear handoff points. Each prompt ends with a fixed "… READY" report
+    heading, so you know what to paste where. The backend proves its "ready"
+    with a smoke script that plays a full game, instead of just claiming it.
+  - Deliverables built in. Each session logs its own prompts verbatim to its
+    docs/ai-usage/0N-*.md file, and commits only its own folders, one commit per
+    task.
+
+  Contract changes to match
+  - §1 now describes both sessions working at the same time in one working tree
+    on main, not separate branches.
+  - §6.2 now requires the data-access interface and wiring only after the
+    backend reports ready.
+  - §6.3 now starts with a fresh-clone check, since there's no branch merge
+    anymore.
+
+  Two things to know before you start
+  - Docker Desktop must be running before B1, or B1's npm start check will fail.
+  - Each "Verify" step in F2 and F3 ends with a manual checklist for you,
+    because the frontend session can't click through a browser.
