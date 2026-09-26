@@ -9,6 +9,7 @@ import type {
   SeatResponse,
 } from '@othello/shared';
 import { listGames, pingDb } from '../db/gamesRepo';
+import type { AnalysisRunner } from '../analysis/AnalysisRunner';
 import { GameError, toGameSummary, type GameService } from '../game/GameService';
 
 const STATUS_FOR: Record<ErrorCode, number> = {
@@ -42,7 +43,7 @@ function parseName(body: unknown): string {
 type Handler = (req: Request, res: Response) => Promise<void>;
 const wrap = (h: Handler) => (req: Request, res: Response, next: NextFunction) => h(req, res).catch(next);
 
-export function apiRouter(games: GameService): express.Router {
+export function apiRouter(games: GameService, analysis: AnalysisRunner): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: '10kb' }));
 
@@ -88,7 +89,7 @@ export function apiRouter(games: GameService): express.Router {
   }));
 
   r.get('/games/:id/analysis', wrap(async (req, res) => {
-    const body: AnalysisResult = await games.getAnalysis(req.params.id);
+    const body: AnalysisResult = await analysis.getAnalysis(req.params.id);
     res.json(body);
   }));
 

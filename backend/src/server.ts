@@ -7,7 +7,8 @@ import { runMigrations } from './db/migrate';
 import { pool } from './db/pool';
 import { GameService } from './game/GameService';
 import { apiRouter } from './http/routes';
-import { registerSocketHandlers } from './socket/handlers';
+import { AnalysisRunner } from './analysis/AnalysisRunner';
+import { registerSocketHandlers, roomFor } from './socket/handlers';
 
 async function main(): Promise<void> {
   // Idempotent; also run by `npm start`, but this makes `npm run dev -w backend` self-sufficient.
@@ -15,16 +16,25 @@ async function main(): Promise<void> {
 
   const games = new GameService();
   const app = express();
-  app.disable('x-powered-by');
-  app.use('/api', apiRouter(games));
-
   const httpServer = createServer(app);
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
   registerSocketHandlers(io, games);
 
+  const analysis = new AnalysisRunner(games, {
+    progress: (p) => io.to(roomFor(p.gameId)).emit('analysis:progress', p),
+    ready: (p) => io.to(roomFor(p.gameId)).emit('analysis:ready', p),
+  });
+
+  app.disable('x-powered-by');
+  app.use('/api', apiRouter(games, analysis));
+
   httpServer.listen(PORT, () => console.log(`[api] listening on http://localhost:${PORT}`));
 
+  const requeued = await analysis.requeueOnBoot();
+  if (requeued > 0) console.log(`[analysis] re-queued ${requeued} game(s) from a previous run`);
+
   const shutdown = () => {
+    analysis.stop();
     io.close();
     httpServer.close(() => void pool.end().finally(() => process.exit(0)));
     setTimeout(() => process.exit(0), 2000).unref();

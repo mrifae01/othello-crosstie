@@ -59,3 +59,39 @@ END your final message with a section titled "BACKEND PART 1 READY" that the use
   - Judgment call: join is a conditional `UPDATE … WHERE status='waiting' AND white_token_hash IS NULL`, so two racing joins can't both win, even across processes.
 - **Task 4 (game flow):** `GameService` (cache, promise-chain mutex, sha256 token hashing with timing-safe compare, auto-pass in the same tx, game over → `pending`, resign), REST routes, socket handlers, `server.ts`, and `scripts/smoke.ts`.
   - Judgment call: the service takes an `afterPersist` callback so the order persist → ack → broadcast happens inside the per-game lock. Broadcasts go through `GameService.onState`, so REST join and socket moves share one broadcast path. Deviations are in `docs/contract-deviations.md` (B1–B11).
+
+## Prompt 2
+
+```text
+So now with backend part 1 done the frontend session should be good to start wiring up the endpoints?
+```
+
+- Answered: yes. The game-flow endpoints and events are live and smoke-tested; analysis is still stubbed (`pending`, no `analysis:*` events) until part 2.
+
+## Prompt 3 (B2: backend part 2)
+
+```text
+ok while the frontend is working on that initial wiring, correct me if I am wrong, but you should be good to starting working on part 2:
+
+Part 2: design-contract.md §6.1 tasks 5–6. Same ownership, git, and prompt-log rules as before. Append this prompt to docs/ai-usage/01-backend-session.md verbatim.
+
+5. shared/src/engine/eval.ts and search.ts, following "Engine rules the implementation must respect" in §4.1: negamax + alpha-beta, pass handling inside the tree, a full-window score for every root move, an exact solve when empties <= exactEmpties, and iterative deepening with timeBudgetMs. Add the remaining required tests from §4.1 (free corner, exact solve vs. brute force at <= 4 empties).
+   Measure early: time search() on each position of one full game (the smoke-test game is fine) and log the per-ply time. Target a full-game analysis under ~30s. Tune depth, timeBudgetMs, and exactEmpties to hit it.
+6. shared/src/engine/analyze.ts (the analyzeGame generator, plus summarize), backend AnalysisRunner (§4.2), a complete GET /api/games/:id/analysis, and re-queueing pending/running games on boot. Emit analysis:progress after each ply and analysis:ready at the end, and re-broadcast game:state on every analysis status transition. Motifs return [] for now.
+
+VERIFY
+- Extend the smoke script: after the game ends, wait for analysis:ready, GET the analysis, and assert status === 'done', plies.length === moves.length, every non-pass ply has a non-null bestSquare, loss >= 0, isBlunder === (classification === 'blunder'), and summary is non-null. Print the total analysis time and the per-player class counts.
+- Sanity check the classifications: with legalMoves[0] play, expect a mix of classes, not all "blunder" and not all "best". If it's lopsided, fix the eval scale (not the thresholds) per §8 risk 2.
+- `npm test` is green.
+- Record the final thresholds and the depth/time settings under a "Tuned values" heading in docs/contract-deviations.md.
+
+STRETCH, only if everything above passes: shared/src/engine/motifs.ts per the Motif definitions in §2, with a test for took_corner and x_square.
+
+END your final message with a section titled "BACKEND PART 2 READY" for the frontend session: what's live, the typical analysis duration, the smoke-test game ID(s) left in the DB that the frontend can open at /game/:id/analysis, and any deviations.
+```
+
+- **Task 5 (eval + search):** `engine/core.ts` (an internal Int8Array board with in-place make/unmake), `eval.ts`, and `search.ts` (negamax + α-β with pass handling, full-window scores for every root move, exact solve ≤ `exactEmpties`, iterative deepening with a deadline). Tests cover the free corner (both colours), exact solve vs. brute-force minimax at ≤ 4 empties (60 random positions, every root move), a pass inside the tree, colour/rotation symmetry, the time budget, and core-vs-rules move generation.
+  - Judgment calls: I used a separate fast board representation rather than calling `rules.ts` in the search loop, for speed, and cross-tested the two for equivalence. When the corner test failed I first suspected an asymmetry bug; a mirror test showed the engine was symmetric and my hand-typed position was wrong. The real issue was a corner weight of 8, which I raised to 12. Timing was measured before choosing settings (below).
+- **Task 6 (analysis):** `analyze.ts` (`analyzeGame` generator, `classify`, `summarize`), `AnalysisRunner` (FIFO, one game at a time, per-ply DB write + `analysis:progress` + `setImmediate`, status transitions re-broadcast through `GameService`, boot re-queue, clean stop on shutdown), the full `GET …/analysis`, and an extended smoke test. Settings: depth 8, exactEmpties 12, 400 ms/ply, giving 2.6 s for the smoke game and 11–19 s for random games. Verified the restart-mid-analysis re-queue live.
+  - Judgment calls: a pass reuses the previous ply's `evalAfter` (the same position, already searched). The runner subscribes to `GameService.onState` and enqueues on `pending`, so neither move nor resign code knows about analysis. The first restart test showed shutdown trying to mark a game `failed` after the pool closed, so I added `stop()` to leave it `running` for re-queue.
+- **Stretch (motifs):** `motifs.ts` implements all five §2 motifs, with tests for took_corner, missed_corner, x_square (incl. the corner-occupied case), allowed_corner and c_square. Deviations are B12–B21, with a "Tuned values" section, in `docs/contract-deviations.md`.

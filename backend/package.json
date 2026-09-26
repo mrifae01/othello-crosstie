@@ -8,6 +8,7 @@
     "start": "tsx src/server.ts",
     "migrate": "tsx src/db/migrate.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "bench": "tsx scripts/bench-analysis.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

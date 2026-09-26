@@ -8,8 +8,10 @@ import {
   nextTurn,
   opponent,
   winnerOf,
-  type AnalysisResult,
+  type AnalysisStatus,
   type ErrorCode,
+  type GameStatus,
+  type PlayedMove,
   type GameState,
   type GameSummary,
   type Player,
@@ -265,15 +267,23 @@ export class GameService {
     });
   }
 
-  /** Part 1: analysis is not run yet, so this reflects DB status with no plies. */
-  async getAnalysis(gameId: string): Promise<AnalysisResult> {
-    const g = await this.mustLoad(gameId);
-    return {
-      game: toGameSummary(g),
-      status: g.analysisStatus,
-      progress: null,
-      plies: [],
-      summary: null,
-    };
+  /** Moves of a game (for the analysis runner); null if the game doesn't exist. */
+  async getMoves(gameId: string): Promise<{ status: GameStatus; moves: PlayedMove[] } | null> {
+    const g = await this.load(gameId);
+    return g ? { status: g.status, moves: g.moves.map((m) => ({ ...m })) } : null;
+  }
+
+  async getSummary(gameId: string): Promise<GameSummary> {
+    return toGameSummary(await this.mustLoad(gameId));
+  }
+
+  /** Persists an analysis status transition, then re-broadcasts game:state (version unchanged). */
+  async setAnalysisStatus(gameId: string, status: AnalysisStatus, error: string | null = null): Promise<void> {
+    await this.withLock(gameId, async () => {
+      const g = await this.mustLoad(gameId);
+      await repo.setAnalysisStatus(gameId, status, error);
+      g.analysisStatus = status;
+      this.emit(g);
+    });
   }
 }
