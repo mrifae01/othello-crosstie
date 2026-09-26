@@ -1,3 +1,7 @@
 export * from './types';
 export * from './notation';
 export * from './engine/rules';
+export * from './engine/eval';
+export * from './engine/search';
+export * from './engine/analyze';
+export * from './engine/motifs';

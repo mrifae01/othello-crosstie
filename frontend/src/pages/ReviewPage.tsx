@@ -93,7 +93,9 @@ function ReviewLoader({ gameId }: { gameId: string }) {
               : 'Analysis starts automatically when the game ends.'}
           </p>
         )}
-        {result.status === 'pending' && <AnalysisBar label="Queued for analysis…" />}
+        {result.status === 'pending' && (
+          <AnalysisBar label="Analysis in progress… This page updates by itself when the review is ready." />
+        )}
         {result.status === 'running' && (
           <AnalysisBar
             label={progress ? `Analyzing move ${progress.done} of ${progress.total}…` : 'Analyzing…'}
@@ -152,7 +154,7 @@ function ReviewBody({ result, summary }: ReviewBodyProps) {
             {game.players.B.name} (Black) vs {game.players.W?.name ?? '?'} (White) · {resultText(game)}
           </p>
         </div>
-        <Link to={`/game/${game.gameId}`} className="btn btn-quiet">
+        <Link to={`/game/${game.gameId}`} className="btn">
           View game
         </Link>
       </header>

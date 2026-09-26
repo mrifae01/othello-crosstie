@@ -22,6 +22,11 @@ export function MockDevBar({ client }: { client: MockClient }) {
         MOCK DATA {open ? '▾' : '▸'}
       </button>
       {open && (
+        <a href="/?mock=0" className="devbar-exit">
+          Exit mock mode (use the real backend)
+        </a>
+      )}
+      {open && (
         <>
           <div className="devbar-row">
             {client.fixtures.map((f) => (

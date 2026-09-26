@@ -10,6 +10,8 @@ import { NameForm } from '../components/NameForm';
 import { PlayersCard } from '../components/PlayersCard';
 import { AnalysisBar } from '../components/AnalysisBar';
 import { useToasts } from '../components/Toasts';
+import { useLeaveGuard } from '../components/LeaveGuard';
+import { isGameClientError } from '../data/GameClient';
 import { colorName, errorText, resultText } from '../format';
 
 export function GamePage() {
@@ -25,6 +27,29 @@ function GameView({ gameId }: { gameId: string }) {
   const { state, you, seatKnown, notFound, error, progress, analysisReady } = useLiveGame(gameId, token);
   const [moving, setMoving] = useState(false);
   const [joining, setJoining] = useState(false);
+
+  // Leaving a live game you're seated in (via the header) resigns it, behind a confirm.
+  const seatedInLiveGame = state?.status === 'active' && you !== null && !!token;
+  useLeaveGuard(
+    seatedInLiveGame
+      ? {
+          title: 'Leave and resign?',
+          body: 'Going back home will resign this game, and your opponent will be awarded the win.',
+          confirmLabel: 'Resign and go home',
+          cancelLabel: 'Stay in game',
+          onConfirm: async () => {
+            try {
+              await client.resign(gameId, token!);
+            } catch (e) {
+              // Game already over (e.g. the opponent resigned meanwhile): nothing to resign, just leave.
+              if (isGameClientError(e) && (e.code === 'GAME_NOT_ACTIVE' || e.code === 'GAME_NOT_FOUND')) return;
+              toasts.error(errorText(e));
+              throw e;
+            }
+          },
+        }
+      : null,
+  );
 
   if (notFound) {
     return (
@@ -95,7 +120,7 @@ function GameView({ gameId }: { gameId: string }) {
               <p className="muted small">
                 {state.players.B.name} is waiting. You'll play White.
               </p>
-              <NameForm label="Your name" submitLabel="Join as White" busy={joining} onSubmit={join} />
+              <NameForm label="Your name" submitLabel="Join as White" busy={joining} prefill={false} onSubmit={join} />
             </>
           )}
 
@@ -204,7 +229,7 @@ function ResignControl({ gameId, token }: { gameId: string; token: string }) {
           </button>
         </>
       ) : (
-        <button type="button" className="btn btn-quiet" onClick={() => setConfirming(true)}>
+        <button type="button" className="btn btn-resign" onClick={() => setConfirming(true)}>
           Resign…
         </button>
       )}
@@ -236,7 +261,9 @@ function GameOver({ state, you, progress, analysisReady }: GameOverProps) {
       </div>
 
       {status === 'none' && <p className="muted small">No analysis for this game: no moves were played.</p>}
-      {status === 'pending' && <AnalysisBar label="Queued for analysis…" />}
+      {status === 'pending' && (
+        <AnalysisBar label="Analysis in progress… The review unlocks when it's ready. You can leave and come back later." />
+      )}
       {status === 'running' && (
         <AnalysisBar
           label={progress ? `Analyzing move ${progress.done} of ${progress.total}…` : 'Analyzing…'}

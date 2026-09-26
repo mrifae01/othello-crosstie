@@ -16,4 +16,71 @@ Places where `design-contract.md` was ambiguous, silent, or conflicted with a se
 | B8 | Resign "at least one move" | "enqueues analysis if at least one move was played" | `analysisStatus = moves.length > 0 ? 'pending' : 'none'` | A pass can never be ply 1, so `moves.length > 0` is equivalent. |
 | B9 | Migrations on boot | §1: `start.mjs` runs `npm run migrate` | `server.ts` **also** runs migrations on boot (idempotent, advisory-locked) | Makes `npm run dev -w backend` self-sufficient. |
 | B10 | Docker CLI discovery | `start.mjs` runs `docker compose …` | Falls back to `/Applications/Docker.app/Contents/Resources/bin/docker` if `docker` isn't on PATH. Root `db:reset` still calls plain `docker` (per §1). | Docker Desktop on the dev Mac didn't put the CLI on PATH. |
-| B11 | Analysis (part 1 only) | §3.3/§4.2 runner | Game end sets `analysis_status='pending'` and broadcasts. Nothing moves it past `pending` yet. `GET …/analysis` returns `{status, progress:null, plies:[], summary:null}`. | Per the B1 prompt scope. Part 2 adds the runner and the boot re-queue. |
+| B11 | Analysis (part 1 only) | §3.3/§4.2 runner | ~~Stays `pending`~~ **Superseded in part 2**: the runner is live. | — |
+
+## Frontend session, part 2 (wiring the real backend)
+
+How the frontend absorbs each backend deviation, plus the frontend's own interpretations.
+
+| # | Area | Backend behavior / contract gap | Frontend adjustment | Why |
+|---|---|---|---|---|
+| F1 | B2 unknown `/api/*` → 404 `BAD_REQUEST` | Only reachable via a bad path | None needed: `BAD_REQUEST` shows the generic "request was invalid" text | The client only calls §3.1 paths. |
+| F2 | B3 malformed id → `GAME_NOT_FOUND` | `/game/not-a-uuid` 404s | None needed: Game and Review pages already render "Game not found" on that code | Verified in the browser. |
+| F3 | B4 `limit` clamped | — | None: the client always sends `status=finished&limit=20` | — |
+| F4 | B6 socket `BAD_REQUEST` ack | Malformed payloads | None: ack errors map to `GameClientError(code)` generically | The UI only ever sends well-formed payloads. |
+| F5 | B11 analysis stays `pending` | No `analysis:progress` / `analysis:ready` yet | The game-over panel and Review page show "Analysis in progress…" with the Review button disabled, and say you can leave and come back. The Review page spectates and refetches on any `game:state` whose `analysisStatus` settles, not only on `analysis:ready`. Home shows "Analysis pending". | Must not look stuck or wait forever; part 2 lights it up with no frontend change. |
+| F6 | Version can jump by 2 (auto-pass); resign keeps version | Per contract | None: the reducer drops only strictly lower versions | Already §2-compliant. |
+| F7 | No server-side unsubscribe event | Contract has none | `unsubscribe()` just drops the local handlers. The socket stays in the room and events for unwatched games are ignored | Harmless; a `game:unsubscribe` could be added later. |
+| F8 | Network / timeout errors | `ErrorCode` has no network code | fetch failures, non-`ApiError` error bodies and ack timeouts (8s) surface as `INTERNAL` with a connection-oriented message | `types.ts` is frozen. |
+| F9 | Mock flag | §6.2: "mocks stay reachable behind `?mock=1`" | `?mock=1` sticks for the tab (sessionStorage) so in-app navigation and refresh stay mocked; `?mock=0` exits | A query-only flag would silently drop to the real API on the first navigation. |
+
+## Backend session, part 2
+
+| # | Area | What the contract says | What was built | Why / proposed fix |
+|---|---|---|---|---|
+| B12 | Terminal eval | "exact disc differential" | Raw `B − W` disc count. Empty squares on an early-terminated board are **not** awarded to the winner. | Matches `countDiscs` / `winnerOf` and what the UI shows. The WOF empties-to-winner rule would make the graph disagree with the displayed score. |
+| B13 | Pass plies | `evalBefore = evalAfter = evaluate(board)`, "or the search value if that's cheap" | Both are set to the **previous ply's `evalAfter`**, and `depth`/`exact` are inherited from it | That is the search value of the same position (negamax handles the pass), so it costs nothing and the graph stays flat across a pass. |
+| B14 | `timeBudgetMs` | "iterative deepening stops at this" | Depth 1 always completes. The exact endgame solve (empties ≤ `exactEmpties`) ignores the budget. | So there's always a result, and exact solves at ≤ 12 empties take < 100 ms here anyway. |
+| B15 | `summary.counts` | `Record<MoveClass, number>` | Counts **every** ply of that player, including passes (as `forced`). So `sum(counts) ===` that player's ply count. Accuracy and `avgLoss` exclude forced plies, per the contract. | Lets the move-list badges and the summary card agree. |
+| B16 | Eval precision | — | `evalBefore`, `evalAfter`, `loss` and candidate evals are rounded to 2 decimals. The `real` DB columns are re-rounded on read. | Avoids float4 noise such as `4.329999923`. |
+| B17 | Live responsiveness during analysis | "`setImmediate` between plies so live games stay responsive" | Implemented, but one ply's search blocks for up to ~400 ms (the budget). Measured: `/api/health` took 0.4 s typically, with one 1.2 s spike, while a game was being analyzed. | Within the §8 budget. The fix is the roadmap's `worker_threads` pool (§7.2). |
+| B18 | `GET …/analysis` consistency | `plies` populated iff `done` | If status is `done` but some `moves` row lacks analysis (shouldn't happen), the API reports `status: 'failed'` rather than a partial result | Defensive: never violate "length === moves.length iff done". |
+| B19 | Shutdown mid-analysis | Silent | `SIGINT`/`SIGTERM` stops the runner after the current ply without marking the game failed. It stays `running` and is re-queued on the next boot (verified). | Restarts shouldn't produce spurious `failed` reviews. |
+| B20 | Motifs (stretch) | §2 definitions | Implemented. `allowed_corner` = corners legal for the opponent after the move that weren't legal for them on `boardBefore`. `x_square`/`c_square` require the adjacent corner to be empty on `boardBefore`. | Straight reading of §2. |
+| B21 | Tooling | — | `npm run bench -w backend [-- --depth N --exact N --budget MS --verbose]` times `analyzeGame` per ply. `SMOKE_SEED=<n> npm run smoke -w backend` plays seeded random moves instead of `legalMoves[0]`. | Used for tuning, and gives the frontend realistic games to review. |
+
+## Tuned values
+
+**Classification thresholds** (loss in discs, mover POV; unchanged from §4.1):
+
+| best | good | inaccuracy | mistake | blunder |
+|---|---|---|---|---|
+| ≤ 0.5 | ≤ 2 | ≤ 5 | ≤ 10 | > 10 |
+
+Moves with exactly one legal option, and passes, are `forced` (loss 0). Accuracy per player is `100 · mean(exp(−loss/6))` over non-forced moves.
+
+**Search settings** (`ANALYSIS_SEARCH_OPTIONS` in `shared/src/engine/analyze.ts`): `depth: 8`, `exactEmpties: 12`, `timeBudgetMs: 400` per ply (iterative deepening; the deepest completed depth is used).
+
+**Eval weights** (`EVAL_WEIGHTS` in `shared/src/engine/eval.ts`, disc units, Black POV):
+- corner ±12
+- X-square −4 and C-square −1.5, each only while the adjacent corner is empty
+- mobility `10·(mB−mW)/(mB+mW+2)`
+- frontier `5·(fW−fB)/(fB+fW+2)`
+- disc parity `0.6·filled²·(B−W)`, where `filled` goes from 0 to 1 over the game
+- clamped to ±64
+
+The corner weight was raised from 8 to 12 because at 8 an obviously free corner scored below quiet moves.
+
+**Measured** (M-series Mac, `npm run bench -w backend`):
+
+| Game | Plies | Full analysis | Slowest ply |
+|---|---|---|---|
+| Smoke game (always `legalMoves[0]`) | 64 | 2.6 s | 0.2 s |
+| Seeded random games | 60–62 | 11–19 s | ≈ 0.5 s |
+| Hard ceiling | ~60 | ≈ 60 × 0.4 s ≈ 25 s, plus the endgame (< 1 s) | — |
+
+**Scale check (§8 risk 2):** the eval scale needed no change.
+- Random play gives a spread: roughly 25% best, 15% good, 20% inaccuracy, 15–20% mistake, 15–20% blunder.
+- The smoke game has 25 best and 11 blunders out of 64 plies.
+- Accuracy lands at 50–70% for random or first-legal-move play.
+- Neither "everything is a blunder" nor "nothing is" occurs.

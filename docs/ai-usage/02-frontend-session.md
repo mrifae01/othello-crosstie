@@ -72,3 +72,139 @@ kill the job running on port 5173. I want to run this frontend locally to see wh
 ### Task notes
 
 - Killed the stray Vite on 5173 (an `npm run dev` I didn't start). Root cause of "nothing appears": `npm run dev -w frontend --port N` (no `--`) makes npm eat `--port` and pass `N` to Vite as the **project root**, so Vite serves an empty `frontend/N/` directory and skips `vite.config.ts`. The fix is `npm run dev -w frontend -- --port N`. Separately, the old server's pre-bundle cache (`frontend/node_modules/.vite`) was stale ("504 Outdated Optimize Dep" → blank page), so I deleted it. It's a disposable cache that regenerates on the next start. Verified both commands in headless Chrome.
+
+---
+
+## Prompt 3
+
+```
+The backend session reports its game endpoints are implemented and verified. Its report:
+
+BACKEND PART 1 READY
+Start the stack: npm install && npm start from the repo root.
+
+Postgres runs in Docker (postgres:16-alpine, service db) on host port 5433.
+API and Socket.IO run on :3001.
+Vite runs on :5173 and proxies /api and /socket.io to the API.
+To skip Docker: DATABASE_URL=postgres://… npm start.
+To reset the database: npm run db:reset.
+Smoke test (with the stack running): npm run smoke -w backend. Set API_URL=... to point it at a different server.
+
+Unit tests: npm test
+
+REST endpoints (all verified by the smoke test):
+
+Endpoint	Success	Errors
+POST /api/games {name}	201 SeatResponse (color B), game is waiting	400 BAD_REQUEST if the name is blank or longer than 24 characters after trimming
+POST /api/games/:id/join {name}	200 SeatResponse (color W), game becomes active with turn B, and game:state is broadcast to the room	400, 404 GAME_NOT_FOUND, 409 GAME_FULL
+GET /api/games/:id	200 GameState	404 GAME_NOT_FOUND (also returned for ids that aren't UUIDs)
+GET /api/games?status=finished&limit=20	200 {games: GameSummary[]}, newest finishedAt first. status is optional and accepts waiting, active or finished.	400 if limit isn't a positive integer. Limits over 50 are cut to 50, not rejected.
+GET /api/games/:id/analysis	Always 200: {game, status: analysisStatus, progress: null, plies: [], summary: null}	404
+GET /api/health	200 {ok: true, db: boolean}	—
+Any other /api/* path	—	404 with code BAD_REQUEST (the contract has no better code)
+Every error response has the body {error: {code, message}}.
+
+Socket.IO events (all verified):
+
+game:subscribe {gameId, playerToken?} returns {ok: true, state, you}.
+
+you is 'B', 'W', or null for a missing or invalid token (the socket becomes a spectator, which is not an error).
+An unknown game returns GAME_NOT_FOUND.
+The socket joins room game:<id>. Re-subscribe on every connect.
+game:move {gameId, playerToken, square} is checked in this order, and the first failure is returned:
+
+GAME_NOT_FOUND
+GAME_NOT_ACTIVE
+BAD_TOKEN
+NOT_YOUR_TURN
+ILLEGAL_MOVE
+On success the move is saved, then acked with {ok: true}, then game:state goes to the whole room, sender included.
+
+game:resign {gameId, playerToken} returns GAME_NOT_FOUND, GAME_NOT_ACTIVE or BAD_TOKEN on failure. On success the winner is the other player, endReason is 'resign', and game:state is broadcast.
+
+game:state is sent after join, move and resign. The server always sends the whole state.
+
+analysis:progress and analysis:ready are not emitted yet. They come in part 2.
+
+Error codes the frontend should expect in socket acks:
+
+GAME_NOT_FOUND, GAME_NOT_ACTIVE, BAD_TOKEN, NOT_YOUR_TURN, ILLEGAL_MOVE, INTERNAL.
+BAD_REQUEST if the payload is malformed: gameId missing, or square not an integer from 0 to 63.
+Quirks the frontend should know:
+
+Passes are automatic. When the opponent has no legal move, a pass is added right after the real move (square: null, flipped: []) and turn stays with the mover. One broadcast can therefore raise version by 2.
+flipped is sorted ascending and does not include the square that was played.
+When a game ends normally: status: 'finished', winner by disc count ('draw' on a tie), endReason: 'normal', turn: null, legalMoves: [], analysisStatus: 'pending'.
+For now analysisStatus stays pending, because the analysis runner comes in part 2. The UI should show "analysis pending" and not wait forever.
+Resign before any move leaves analysisStatus: 'none'.
+Resign doesn't change version, so accept a game:state whose version equals the one you hold.
+Server restart: games reload from Postgres when first requested, so a refresh keeps the seat as long as the token is still in sessionStorage.
+Contract deviations: B1–B11 in docs/contract-deviations.md. The ones that affect the frontend:
+
+B2: unknown /api/* paths return 404 with code BAD_REQUEST.
+B3: a malformed game id is treated as not found.
+B4: limit over 50 is capped, not rejected.
+B6: malformed socket payloads get a BAD_REQUEST ack.
+B11: analysis stays pending until part 2.
+
+Same ownership, git, and prompt-log rules as before. Append this prompt to docs/ai-usage/02-frontend-session.md verbatim.
+
+Wire the real backend for the GAME FLOW:
+- Implement frontend/src/data/httpClient.ts (the real GameClient): fetch wrappers for §3.1 that turn ApiError bodies into your typed error; a typed singleton Socket<ServerToClientEvents, ClientToServerEvents> using relative URLs (Vite proxies); re-emit game:subscribe for every active subscription on every 'connect', because a reconnect creates a fresh socket in no rooms; and ack → resolve/reject mapping for move and resign.
+- Make the real client the default. Keep mocks reachable via ?mock=1.
+- Analysis on the real backend currently returns status 'pending' or 'none' with empty plies (the runner isn't built yet). The game-over screen and review page must handle that gracefully with a "Analysis in progress…" state. The review UI can still be exercised with ?mock=1.
+- Adjust anything the backend report says differs from the contract, and log each adjustment.
+
+VERIFY
+- `npm run typecheck -w frontend` and `npm run build -w frontend` pass.
+- With `npm start` running (start it yourself if it isn't): curl http://localhost:5173/api/health through the Vite proxy; create and join a game via curl through the proxy; confirm GET /api/games/:id returns an active GameState.
+- You can't click through a browser, so end with a short MANUAL TEST CHECKLIST for me: two tabs, create → copy link → join in a second tab (pasted into a new tab) → play several moves → refresh mid-game (seat kept) → illegal click → resign.
+
+END with a section titled "FRONTEND PART 2 READY".
+```
+
+### Task notes
+
+- **Real client:** `data/httpClient.ts` has fetch wrappers (ApiError → `GameClientError`; network/non-ApiError/timeout → `INTERNAL`) and one lazily created typed Socket.IO connection on relative URLs. It keeps a set of live subscriptions, routes `game:state`/`analysis:*` to the ones for that `gameId`, and on every `connect` re-emits `game:subscribe` for each and pushes the fresh state through `onState`. Move and resign use `emitWithAck` with an 8s timeout. `main.tsx` defaults to the real client. `?mock=1` switches the tab to mocks and sticks via sessionStorage (judgment call: a query-only flag would be lost on the first in-app navigation), and `?mock=0` or the dev bar's "Exit mock mode" link leaves.
+- **Backend deviations:** mapped each one in `docs/contract-deviations.md` (F1–F9). The only behavior change is B11: pending analysis now reads "Analysis in progress…" with Review disabled, and Home says "Analysis pending". Also fixed a papercut the real two-tab run exposed: the join form no longer pre-fills the last name used in this browser (it was offering the creator's own name in the second tab).
+- **Verified against the real API** (backend's `npm start` API on 3001 + a fresh Vite on 5173): curl through the proxy (health, create, join, GET active state, 409, 404, analysis `none`, Socket.IO handshake). Then headless Chrome, three tabs: create → invite link → join → 6 alternating moves synced live → refresh keeps seat → illegal and out-of-turn toasts from server acks → spectator tab → resign propagates to all tabs → pending-analysis states on the game and Review pages → `?mock=1`/`?mock=0`. The websocket runs through the proxy. Not automated: socket reconnect after an API restart (it's in the manual checklist).
+
+---
+
+## Prompt 4
+
+```
+Great I have tested manually and everything seems to be working. While the backend is finishing up its current prompt I want to make some UI changes. Firstly, I want to optimize that amount of space that is used. Recent games should be on the far right and the play with a friend should be centered. Also any button, like the resign button should have some sort of background and not be transparent.
+```
+
+### Task notes
+
+- **Layout:** widened the app to 1440px. Home is now a 3-column grid with equal side columns, so "Play Othello with a friend" sits dead centre and Recent games sits in the right column; it drops to 2 columns under 1200px and 1 under 900px. Game and Review boards are sized as `min(max, 100vh − chrome)`, so the whole board (and the review stepper) fits the window without scrolling. Sidebars are capped (460 / 560px) and the pair is centred, instead of the sidebar stretching.
+- **Buttons:** `.btn` now has a solid warm-grey fill (was white-on-white), and the transparent `.btn-quiet` is removed. Resign uses a new soft-red `.btn-resign` fill, since it's destructive but not the primary action. The review move-list entries (clickable) got a light chip fill so they read as buttons. Checked by screenshots at 1440×900, 1280×720 and 1100×800.
+
+---
+
+## Prompt 5
+
+```
+make the recent games overflow after 3 games (roughly the same height as the "play a friend" section". Make the Othello Crosstie header centered and when in another page like /review or /game, make a "Back home" button. If the user is in a game and this happens, they will need a popup that going back home will resign from the current game
+```
+
+### Task notes
+
+- **Recent games:** the list shows three games and then scrolls (fixed two-line rows, so "3 rows" is exact; the panel lands about the create panel's height, 276 vs 258px). Rows use a compact one-line result ("Dana won by resignation") with the full text as a tooltip, because the long form was getting ellipsized.
+- **Header:** the brand and tagline are centred in a 3-column header. On any non-home route a "← Back home" button sits on the left.
+- **Leave guard:** new `components/LeaveGuard.tsx` (provider + `useLeaveGuard` + `useLeave`, native `<dialog>` so focus trap, Esc and backdrop come free). The Game page registers a guard only while you're seated in an *active* game. Both "Back home" and the brand link go through it; the brand link would otherwise have been an unguarded way home. Confirm calls `resign` then navigates; `GAME_NOT_ACTIVE`/`NOT_FOUND` (the game ended meanwhile) just leaves; other errors toast and stay. "Stay in game" is listed first and focused by default. No dialog for waiting games (the server can't resign a waiting game), spectators, finished games or the review page. Not covered: the browser's own Back button, since `BrowserRouter` has no navigation blocker (it would need a data router plus `useBlocker`).
+- **Verified** against the real backend in headless Chrome: header centred (brand centre 720/1440), 20 games in the list scroll after 3, no dialog from review/waiting/spectator/finished, dialog from a seated active game via both button and brand, Stay/Esc keep the game, confirm resigns (server: `finished, winner=W, endReason=resign`) and the opponent's tab shows the result.
+
+---
+
+## Prompt 6
+
+```
+can you make the recent games length the same verical size the play with a friend section? it is still a little bit larger
+```
+
+### Task notes
+
+- Replaced the fixed "3 rows" max-height with a height match: `.recent` gets `contain: size` + `align-self: stretch`, so the create panel alone sizes the grid row and Recent games fills exactly that height, with the list scrolling inside. This is robust to font and row-height differences, unlike the old hard-coded 66px rows. Tightened row padding/gap slightly so three games still fit fully. Under 900px the panels stack and the list falls back to a ~3-row cap. Measured: both panels 84→341px at 1440 and 1100 wide, three rows fully visible, list scrolls.

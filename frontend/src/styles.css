@@ -46,8 +46,10 @@ a { color: var(--accent); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- Shell ---------- */
-.app { max-width: 1180px; margin: 0 auto; padding: 0 16px 80px; }
-.topbar { display: flex; align-items: baseline; gap: 16px; padding: 18px 0; flex-wrap: wrap; }
+.app { max-width: 1440px; margin: 0 auto; padding: 0 24px 80px; }
+.topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 16px 0 18px; }
+.topbar-center { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.topbar-side:first-child { justify-self: start; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; color: var(--ink); text-decoration: none; }
 .brand-mark { display: inline-flex; }
 .brand-mark .disc { position: static; width: 18px; height: 18px; }
@@ -61,15 +63,16 @@ a { color: var(--accent); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   font: inherit; font-size: 0.95rem; padding: 8px 14px; border-radius: 8px;
-  border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; text-decoration: none;
+  border: 1px solid #d6d2c5; background: #ebe8df; color: var(--ink); cursor: pointer; text-decoration: none;
 }
-.btn:hover:not(:disabled) { border-color: #c9c5b8; background: #fbfaf6; }
+.btn:hover:not(:disabled) { border-color: #c4bfb0; background: #e0dccf; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: #1a6a40; border-color: #1a6a40; }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
 .btn-danger:hover:not(:disabled) { background: #9a1f18; }
-.btn-quiet { background: transparent; }
+.btn-resign { background: #f8e5e3; border-color: #efc9c5; color: var(--danger); font-weight: 600; }
+.btn-resign:hover:not(:disabled) { background: #f2d3cf; border-color: #e6b3ad; }
 .btn-wide { width: 100%; margin-top: 10px; }
 
 .name-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 12px 0; }
@@ -78,16 +81,32 @@ input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-
 input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
 
 /* ---------- Home ---------- */
-.home { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.home {
+  display: grid; gap: 24px; align-items: start;
+  /* Equal side columns keep the hero centred; recent games sit in the right one. */
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 560px) minmax(300px, 1fr);
+}
+.home .hero { grid-column: 2; }
+.home .recent { grid-column: 3; justify-self: end; width: 100%; max-width: 440px; }
 .hero h1 { margin-bottom: 0.4rem; }
-.game-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.game-list { list-style: none; margin: 0; padding: 0 4px 0 0; display: flex; flex-direction: column; gap: 6px; }
+/*
+ * Recent games is exactly as tall as the create panel beside it: `contain: size` stops it from
+ * contributing to the grid row's height, so the hero alone sizes the row, and `align-self: stretch`
+ * then fills it. The list scrolls inside. Rows are compact so three fit.
+ */
+.home .recent { align-self: stretch; contain: size; display: flex; flex-direction: column; min-height: 0; }
+.home .recent .game-list { flex: 1; min-height: 0; overflow-y: auto; }
+.home .recent h2 { margin-bottom: 0.4rem; }
+.home .recent .game-list { gap: 4px; }
+.home .recent .game-row { padding: 6px 12px; gap: 0 12px; }
 .game-row {
   display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 12px;
   border: 1px solid var(--line); border-radius: 8px; color: var(--ink); text-decoration: none;
 }
 .game-row:hover { background: #fbfaf6; border-color: #c9c5b8; }
 .game-row-players { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
-.game-row-result { color: var(--ink-2); font-size: 0.875rem; grid-column: 1; }
+.game-row-result { color: var(--ink-2); font-size: 0.875rem; grid-column: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-row .status-pill { grid-row: 1; grid-column: 2; justify-self: end; }
 .game-row > .muted { grid-column: 2; justify-self: end; }
 .vs { color: var(--muted); font-weight: 400; margin: 0 4px; }
@@ -96,7 +115,12 @@ input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transpare
 .status-pill.analysis-failed { background: #fbe4e2; color: var(--danger); }
 
 /* ---------- Game layout ---------- */
-.game-layout, .review-layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(300px, 1fr); gap: 20px; align-items: start; }
+.game-layout, .review-layout {
+  display: grid; gap: 24px; align-items: start; justify-content: center;
+  /* Board as large as the window height allows (so the whole board is visible without scrolling). */
+  grid-template-columns: minmax(0, min(720px, calc(100vh - 100px))) minmax(320px, 460px);
+}
+.review-layout { grid-template-columns: minmax(0, min(680px, calc(100vh - 270px))) minmax(360px, 560px); }
 .side-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .board-col { min-width: 0; }
 
@@ -178,8 +202,8 @@ input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transpare
 .move-row:nth-child(odd) { background: #f8f7f2; }
 .move-num { color: var(--muted); font-size: 0.8rem; padding-left: 6px; }
 .move-cell { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font: inherit; font-size: 0.9rem; border: 0; background: transparent; text-align: left; color: var(--ink); border-radius: 4px; min-height: 26px; }
-button.move-cell { cursor: pointer; }
-button.move-cell:hover { background: #ebe8dd; }
+button.move-cell { cursor: pointer; background: #efece4; margin: 2px 4px 2px 0; }
+button.move-cell:hover { background: #e2ded2; }
 .move-current { background: #dcefe3 !important; font-weight: 700; }
 .move-pass .move-sq { color: var(--muted); font-style: italic; }
 
@@ -275,7 +299,23 @@ button.move-cell:hover { background: #ebe8dd; }
 .devbar button.active { background: #ffcc66; color: #222; border-color: #ffcc66; }
 .devbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+@media (max-width: 1200px) {
+  .home { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .home .hero { grid-column: 1; }
+  .home .recent { grid-column: 2; max-width: none; }
+}
 @media (max-width: 900px) {
   .home, .game-layout, .review-layout { grid-template-columns: minmax(0, 1fr); }
+  .home .hero, .home .recent { grid-column: 1; }
+  /* Stacked: nothing beside it to match, so cap at about three rows instead. */
+  .home .recent { contain: none; }
+  .home .recent .game-list { flex: none; max-height: 190px; }
   .summary-cards { grid-template-columns: 1fr; }
 }
+.devbar-exit { font-size: 0.75rem; }
+
+/* ---------- Modal ---------- */
+.modal { border: 0; border-radius: 12px; padding: 22px 24px; max-width: 420px; width: calc(100vw - 32px); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); color: var(--ink); }
+.modal::backdrop { background: rgba(20, 24, 22, 0.45); }
+.modal h2 { margin-bottom: 0.4rem; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
