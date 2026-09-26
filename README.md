@@ -56,11 +56,11 @@
 
 ## Working Sessions
 
-### Session 1 — 9/26, 9:30 AM
+### Session 1 — 9/26, 9:30 AM - 11:20AM
 
 **Goal:** Complete architecture plan and begin implementation on foundational project of the game.
 
-<!-- TODO: notes / outcome -->
+Finished architecture and planning. Basic game implementation along with initial game analyzation.
 
 ### Session 2 —
 
