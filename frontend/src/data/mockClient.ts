@@ -262,6 +262,9 @@ export function createMockClient(): MockClient {
     async startTournament() {
       throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
     },
+    async cancelTournament() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
     async forfeitMatch() {
       throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
     },

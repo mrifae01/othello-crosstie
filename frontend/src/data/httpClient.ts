@@ -152,6 +152,7 @@ export function createHttpClient(getAccessToken: AccessTokenProvider = async () 
     joinTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/join`),
     leaveTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/leave`),
     startTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/start`),
+    cancelTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/cancel`),
     forfeitMatch: (id, round, slot, loser) =>
       call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/matches/${round}/${slot}/forfeit`, { loser }),
     claimSeat: (gameId) => call<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/seat`),

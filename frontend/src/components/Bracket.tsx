@@ -15,6 +15,7 @@ interface Props {
 export function Bracket({ tournament: t, viewerId, isOrganizer, busy, onPlay, onForfeit }: Props) {
   const seeds = new Map(t.entrants.map((e) => [e.accountId, e.seed]));
   const firstRoundSlots = 2 ** (t.rounds - 1);
+  const frozen = t.status === 'cancelled';
 
   return (
     <div className="bracket" style={{ gridTemplateColumns: `repeat(${t.rounds}, minmax(200px, 1fr))` }}>
@@ -34,7 +35,8 @@ export function Bracket({ tournament: t, viewerId, isOrganizer, busy, onPlay, on
                   <MatchCard
                     m={m}
                     seeds={seeds}
-                    viewerId={viewerId}
+                    viewerId={frozen ? null : viewerId}
+                    frozen={frozen}
                     isOrganizer={isOrganizer && t.status === 'active'}
                     busy={busy}
                     onPlay={onPlay}
@@ -57,7 +59,8 @@ function MatchCard({
   busy,
   onPlay,
   onForfeit,
-}: Omit<Props, 'tournament'> & { m: TournamentMatch; seeds: Map<string, number | null> }) {
+  frozen,
+}: Omit<Props, 'tournament'> & { m: TournamentMatch; seeds: Map<string, number | null>; frozen: boolean }) {
   const bye = m.status === 'decided' && !m.gameId;
   const isPlayer = viewerId !== null && (m.black?.accountId === viewerId || m.white?.accountId === viewerId);
 
@@ -80,7 +83,7 @@ function MatchCard({
       {row(m.black, 'B')}
       {row(m.white, 'W')}
       <div className="bracket-actions">
-        {m.status === 'playing' && m.gameId && (
+        {!frozen && m.status === 'playing' && m.gameId && (
           <>
             {isPlayer ? (
               <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => onPlay(m)}>
@@ -106,12 +109,19 @@ function MatchCard({
             )}
           </>
         )}
+        {frozen && m.status === 'playing' && m.gameId && (
+          <Link to={`/game/${m.gameId}/analysis`} className="btn btn-small">
+            Review
+          </Link>
+        )}
         {m.status === 'decided' && m.gameId && (
           <Link to={`/game/${m.gameId}/analysis`} className="btn btn-small">
             Review
           </Link>
         )}
-        {m.status === 'pending' && <span className="muted small">Waiting on earlier matches</span>}
+        {m.status === 'pending' && (
+          <span className="muted small">{frozen ? 'Not played' : 'Waiting on earlier matches'}</span>
+        )}
       </div>
     </div>
   );

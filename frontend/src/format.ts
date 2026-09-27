@@ -32,7 +32,9 @@ export function errorText(e: unknown): string {
 }
 
 export function resultText(game: GameSummary): string {
-  if (game.status !== 'finished' || !game.winner) return '';
+  if (game.status !== 'finished') return '';
+  if (game.endReason === 'cancelled') return 'Game ended: tournament cancelled';
+  if (!game.winner) return '';
   if (game.winner === 'draw') return `Draw, ${game.counts.B}–${game.counts.W}`;
   const loser = game.winner === 'B' ? 'W' : 'B';
   const how =

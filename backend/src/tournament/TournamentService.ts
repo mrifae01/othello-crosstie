@@ -127,6 +127,7 @@ export class TournamentService {
   async forfeit(id: string, account: Account, round: number, slot: number, loser: Player): Promise<TournamentDetail> {
     const gameId = await this.locked(id, async (c, t) => {
       if (t.organizer_id !== account.id) throw new GameError('FORBIDDEN', 'Only the organizer can forfeit a match');
+      if (t.status !== 'active') throw new GameError('TOURNAMENT_NOT_OPEN', 'The tournament is not in progress');
       const m = await repo.getMatch(c, id, round, slot);
       if (!m) throw new GameError('BAD_REQUEST', 'No such match');
       if (!m.game_id || m.winner_id) throw new GameError('TOURNAMENT_NOT_OPEN', 'That match is not being played');
@@ -138,23 +139,48 @@ export class TournamentService {
     return this.get(id);
   }
 
-  /** Feeds a finished game's result into its bracket. A no-op for casual games and repeats. */
+  /**
+   * Organizer only: ends the tournament before it has a champion. The bracket freezes as it
+   * stands, and games still being played are force-ended with no winner. Never deletes anything.
+   */
+  async cancel(id: string, account: Account): Promise<TournamentDetail> {
+    const playing = await this.locked(id, async (c, t) => {
+      if (t.organizer_id !== account.id) throw new GameError('FORBIDDEN', 'Only the organizer can end the tournament');
+      if (t.status !== 'registering' && t.status !== 'active') {
+        throw new GameError('TOURNAMENT_NOT_OPEN', 'The tournament is already over');
+      }
+      await repo.markCancelled(c, id);
+      return repo.playingGameIds(c, id);
+    });
+    // After the commit: a game finishing on its own meanwhile is ignored by recordResult.
+    // If we die before these run, reconcileOnBoot finishes the job.
+    for (const gameId of playing) await this.games.abort(gameId);
+    return this.get(id);
+  }
+
+  /** Feeds a finished game's result into its bracket. A no-op for casual games, repeats and ended tournaments. */
   async recordResult(gameId: string, winner: Winner): Promise<void> {
     const match = await repo.matchForGame(pool, gameId);
     if (!match || match.winner_id) return;
     await this.locked(match.tournament_id, async (c, t) => {
       const m = await repo.matchForGame(c, gameId);
       if (!m || m.winner_id) return; // someone else recorded it while we waited for the lock
+      if (t.status !== 'active') return; // cancelled: the bracket is frozen
       const seat = matchWinner(winner);
       await this.decide(c, t, m.round, m.slot, (seat === 'B' ? m.black_id : m.white_id)!);
     });
   }
 
-  /** Re-feeds results that finished but never reached the bracket. Call once on boot. */
+  /**
+   * Call once on boot: re-feeds results that never reached the bracket, and force-ends games
+   * left running in tournaments that were cancelled. Returns how many games it touched.
+   */
   async reconcileOnBoot(): Promise<number> {
     const pending = await repo.listUnrecordedResults();
     for (const r of pending) await this.recordResult(r.gameId, r.winner);
-    return pending.length;
+    const orphaned = await repo.listOrphanedCancelledGames();
+    for (const gameId of orphaned) await this.games.abort(gameId);
+    return pending.length + orphaned.length;
   }
 
   /** Records a match winner and moves them on: into the next match, or to the title. */

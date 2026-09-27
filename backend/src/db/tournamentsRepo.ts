@@ -161,6 +161,31 @@ export async function markFinished(c: Db, id: string, winnerId: string): Promise
   await c.query(`UPDATE tournaments SET status = 'finished', winner_id = $2, finished_at = now() WHERE id = $1`, [id, winnerId]);
 }
 
+export async function markCancelled(c: Db, id: string): Promise<void> {
+  await c.query(`UPDATE tournaments SET status = 'cancelled', finished_at = now() WHERE id = $1`, [id]);
+}
+
+/** Games of matches still being played (created, no winner yet). */
+export async function playingGameIds(c: Db, id: string): Promise<string[]> {
+  const { rows } = await c.query<{ game_id: string }>(
+    'SELECT game_id FROM tournament_matches WHERE tournament_id = $1 AND game_id IS NOT NULL AND winner_id IS NULL',
+    [id],
+  );
+  return rows.map((r) => r.game_id);
+}
+
+/** Games still active in cancelled tournaments (the server died between cancelling and aborting). */
+export async function listOrphanedCancelledGames(): Promise<string[]> {
+  const { rows } = await pool.query<{ game_id: string }>(
+    `SELECT m.game_id
+       FROM tournament_matches m
+       JOIN tournaments t ON t.id = m.tournament_id
+       JOIN games g ON g.id = m.game_id
+      WHERE t.status = 'cancelled' AND g.status = 'active'`,
+  );
+  return rows.map((r) => r.game_id);
+}
+
 export interface MatchRow {
   tournament_id: string;
   round: number;
@@ -224,12 +249,14 @@ export async function usernameOf(c: Db, accountId: string): Promise<string> {
   return rows[0].username;
 }
 
-/** Finished tournament games whose result never reached the bracket (e.g. the server died in between). */
+/** Finished games in active tournaments whose result never reached the bracket (e.g. the server died in between). */
 export async function listUnrecordedResults(): Promise<{ gameId: string; winner: Winner }[]> {
   const { rows } = await pool.query<{ game_id: string; winner: Winner }>(
     `SELECT m.game_id, g.winner
-       FROM tournament_matches m JOIN games g ON g.id = m.game_id
-      WHERE m.winner_id IS NULL AND g.status = 'finished' AND g.winner IS NOT NULL`,
+       FROM tournament_matches m
+       JOIN tournaments t ON t.id = m.tournament_id
+       JOIN games g ON g.id = m.game_id
+      WHERE t.status = 'active' AND m.winner_id IS NULL AND g.status = 'finished' AND g.winner IS NOT NULL`,
   );
   return rows.map((r) => ({ gameId: r.game_id, winner: r.winner }));
 }

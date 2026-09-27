@@ -9,6 +9,13 @@ import { SignInDialog } from '../components/AccountMenu';
 import { Bracket } from '../components/Bracket';
 import { errorText, fmtDate } from '../format';
 
+const STATUS_LABEL: Record<TournamentDetail['status'], (t: TournamentDetail) => string> = {
+  registering: (t) => `Open · ${t.entrantCount}/${t.maxPlayers}`,
+  active: () => 'In progress',
+  finished: () => 'Finished',
+  cancelled: () => 'Cancelled',
+};
+
 /** No tournament socket room yet: poll while games can still change the bracket. */
 const POLL_MS = 5000;
 
@@ -39,14 +46,14 @@ export function TournamentPage() {
     void refresh();
   }, [refresh]);
 
-  const finished = t?.status === 'finished';
+  const over = t?.status === 'finished' || t?.status === 'cancelled';
   useEffect(() => {
-    if (finished) return;
+    if (over) return;
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh();
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [refresh, finished]);
+  }, [refresh, over]);
 
   /** Runs a write that returns the fresh tournament. */
   async function act(fn: () => Promise<TournamentDetail>) {
@@ -81,6 +88,17 @@ export function TournamentPage() {
     void act(() => client.forfeitMatch(id, m.round, m.slot, loser));
   }
 
+  function endTournament(current: TournamentDetail) {
+    const playing = current.matches.filter((m) => m.status === 'playing').length;
+    const question =
+      current.status === 'registering'
+        ? 'Cancel this tournament? Registration closes and no games will be played.'
+        : `End the tournament now? No champion will be declared${
+            playing > 0 ? `, and ${playing} game${playing === 1 ? '' : 's'} in progress will be stopped` : ''
+          }.`;
+    if (window.confirm(question)) void act(() => client.cancelTournament(id));
+  }
+
   if (loadError && !t) {
     return (
       <div className="panel center">
@@ -108,10 +126,26 @@ export function TournamentPage() {
             {isOrganizer && ' (you)'} · Single elimination · Created {fmtDate(t.createdAt)}
           </p>
         </div>
-        <span className={`status-pill tournament-${t.status}`}>
-          {t.status === 'registering' ? `Open · ${t.entrantCount}/${t.maxPlayers}` : t.status === 'active' ? 'In progress' : 'Finished'}
-        </span>
+        <div className="tournament-head-side">
+          <span className={`status-pill tournament-${t.status}`}>
+            {STATUS_LABEL[t.status](t)}
+          </span>
+          {isOrganizer && (t.status === 'registering' || t.status === 'active') && (
+            <button type="button" className="btn btn-danger btn-small" disabled={busy} onClick={() => endTournament(t)}>
+              {t.status === 'registering' ? 'Cancel tournament' : 'End tournament'}
+            </button>
+          )}
+        </div>
       </section>
+
+      {t.status === 'cancelled' && (
+        <div className="result-banner cancelled">
+          <strong>Cancelled by the organizer</strong>
+          <span className="small">
+            {t.startedAt ? 'The bracket is frozen as it stood. ' : ''}Ended {fmtDate(t.finishedAt)}
+          </span>
+        </div>
+      )}
 
       {t.status === 'finished' && t.winner && (
         <div className="result-banner champion">
@@ -120,7 +154,7 @@ export function TournamentPage() {
         </div>
       )}
 
-      {t.status === 'registering' ? (
+      {t.status === 'cancelled' && !t.startedAt ? null : t.status === 'registering' ? (
         <section className="panel">
           <h2>
             Players ({t.entrantCount}/{t.maxPlayers})

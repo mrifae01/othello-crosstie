@@ -265,7 +265,15 @@ interface GameOverProps {
 function GameOver({ state, you, progress, analysisReady }: GameOverProps) {
   const navigate = useNavigate();
   const outcome =
-    you && state.winner ? (state.winner === 'draw' ? 'Draw' : state.winner === you ? 'You won!' : 'You lost') : 'Game over';
+    state.endReason === 'cancelled'
+      ? 'Tournament cancelled'
+      : you && state.winner
+        ? state.winner === 'draw'
+          ? 'Draw'
+          : state.winner === you
+            ? 'You won!'
+            : 'You lost'
+        : 'Game over';
 
   // Either signal is enough: the ready event live, or the persisted status after a refresh.
   const status = analysisReady ?? state.analysisStatus;

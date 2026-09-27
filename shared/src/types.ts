@@ -35,8 +35,11 @@ export interface PlayedMove extends Move {
 
 export type GameStatus = 'waiting' | 'active' | 'finished';
 export type Winner = Player | 'draw';
-/** 'forfeit': a tournament organizer ended the game against a player who didn't show. */
-export type EndReason = 'normal' | 'resign' | 'forfeit';
+/**
+ * 'forfeit': a tournament organizer ended the game against a player who didn't show.
+ * 'cancelled': its tournament was ended by the organizer; the game has no winner.
+ */
+export type EndReason = 'normal' | 'resign' | 'forfeit' | 'cancelled';
 export type AnalysisStatus = 'none' | 'pending' | 'running' | 'done' | 'failed';
 
 export interface PlayerInfo {
@@ -52,7 +55,7 @@ export interface GameSummary {
   status: GameStatus;
   players: { B: PlayerInfo; W: PlayerInfo | null }; // W is null while status === 'waiting'
   counts: { B: number; W: number };
-  winner: Winner | null;        // non-null iff status === 'finished'
+  winner: Winner | null;        // non-null iff status === 'finished', except endReason 'cancelled' (no winner)
   endReason: EndReason | null;  // non-null iff status === 'finished'
   analysisStatus: AnalysisStatus;
   createdAt: string;            // ISO 8601
@@ -203,7 +206,8 @@ export interface ClaimUsernameRequest { username: string }
 // Single elimination, 2..8 players, accounts only. Reads are public; every write needs an
 // account with a claimed username. Bracket math lives in bracket.ts.
 
-export type TournamentStatus = 'registering' | 'active' | 'finished';
+/** 'cancelled': ended by the organizer before a champion was decided. Never deleted. */
+export type TournamentStatus = 'registering' | 'active' | 'finished' | 'cancelled';
 
 export interface TournamentPlayer {
   accountId: string;
@@ -214,13 +218,14 @@ export interface TournamentSummary {
   tournamentId: string;
   name: string;                 // trimmed, 1..40 chars
   status: TournamentStatus;
-  /** Runs the tournament (starts it, forfeits no-shows). Not a player unless they also entered. */
+  /** Runs the tournament (starts it, forfeits no-shows, can end it). Not a player unless they also entered. */
   organizer: TournamentPlayer;
   maxPlayers: number;           // 2..8
   entrantCount: number;
-  winner: TournamentPlayer | null;  // non-null iff status === 'finished'
+  winner: TournamentPlayer | null;  // non-null iff status === 'finished' (never for 'cancelled')
   createdAt: string;            // ISO 8601
   startedAt: string | null;
+  /** When it finished or was cancelled. */
   finishedAt: string | null;
 }
 

@@ -95,6 +95,8 @@ export interface GameClient {
   leaveTournament(id: string): Promise<TournamentDetail>;
   /** Organizer only. */
   startTournament(id: string): Promise<TournamentDetail>;
+  /** Organizer only: ends the tournament (registering or active); games in progress end with no winner. */
+  cancelTournament(id: string): Promise<TournamentDetail>;
   /** Organizer only: the `loser` seat forfeits the match's game. */
   forfeitMatch(id: string, round: number, slot: number, loser: Player): Promise<TournamentDetail>;
   /** POST /api/games/:id/seat: a seat token for the signed-in account's seat (tournament games). */

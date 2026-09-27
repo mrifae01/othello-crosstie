@@ -312,6 +312,30 @@ export class GameService {
     });
   }
 
+  /**
+   * Ends an active game with no winner because its tournament was cancelled.
+   * Returns false (and does nothing) if the game isn't active, e.g. it just finished on its own.
+   */
+  async abort(gameId: string): Promise<boolean> {
+    return this.withLock(gameId, async () => {
+      const g = await this.mustLoad(gameId);
+      if (g.status !== 'active') return false;
+      const snapshot: GameSnapshotUpdate = {
+        ...snapshotOf(g),
+        status: 'finished',
+        turn: null,
+        winner: null,
+        endReason: 'cancelled',
+        analysisStatus: g.moves.length > 0 ? 'pending' : 'none',
+        finishedAt: new Date(),
+      };
+      await repo.updateGame(gameId, snapshot);
+      Object.assign(g, snapshot);
+      this.emit(g);
+      return true;
+    });
+  }
+
   /** Moves of a game (for the analysis runner); null if the game doesn't exist. */
   async getMoves(gameId: string): Promise<{ status: GameStatus; moves: PlayedMove[] } | null> {
     const g = await this.load(gameId);

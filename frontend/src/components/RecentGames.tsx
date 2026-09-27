@@ -85,6 +85,7 @@ function analysisPill(g: GameSummary): string {
 
 /** Compact one-line result for list rows; the discs next to the names already show colours. */
 function shortResult(g: GameSummary): string {
+  if (g.endReason === 'cancelled') return 'Tournament cancelled';
   if (!g.winner) return '';
   if (g.winner === 'draw') return `Draw ${g.counts.B}–${g.counts.W}`;
   const name = g.players[g.winner]?.name ?? (g.winner === 'B' ? 'Black' : 'White');

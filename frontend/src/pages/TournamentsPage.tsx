@@ -33,7 +33,11 @@ export function TournamentsPage() {
     ? [
         { title: 'Open for entry', empty: 'Nothing open right now. Create one!', items: list.filter((t) => t.status === 'registering') },
         { title: 'In progress', empty: 'No tournaments in progress.', items: list.filter((t) => t.status === 'active') },
-        { title: 'Finished', empty: 'No finished tournaments yet.', items: list.filter((t) => t.status === 'finished') },
+        {
+          title: 'Finished',
+          empty: 'No finished tournaments yet.',
+          items: list.filter((t) => t.status === 'finished' || t.status === 'cancelled'),
+        },
       ]
     : [];
 
@@ -75,7 +79,9 @@ export function TournamentsPage() {
 
 function TournamentRow({ t }: { t: TournamentSummary }) {
   const detail =
-    t.status === 'finished' && t.winner
+    t.status === 'cancelled'
+      ? 'Cancelled'
+      : t.status === 'finished' && t.winner
       ? `Won by @${t.winner.username}`
       : t.status === 'registering'
         ? `${t.entrantCount}/${t.maxPlayers} players`

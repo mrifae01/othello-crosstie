@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const requeued = await analysis.requeueOnBoot();
   if (requeued > 0) console.log(`[analysis] re-queued ${requeued} game(s) from a previous run`);
   const reconciled = await tournaments.reconcileOnBoot();
-  if (reconciled > 0) console.log(`[tournament] recorded ${reconciled} result(s) from a previous run`);
+  if (reconciled > 0) console.log(`[tournament] reconciled ${reconciled} game(s) from a previous run`);
 
   const shutdown = () => {
     analysis.stop();

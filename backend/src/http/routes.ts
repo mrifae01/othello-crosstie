@@ -39,7 +39,7 @@ const STATUS_FOR: Record<ErrorCode, number> = {
 };
 
 const GAME_STATUSES: readonly GameStatus[] = ['waiting', 'active', 'finished'];
-const TOURNAMENT_STATUSES: readonly TournamentStatus[] = ['registering', 'active', 'finished'];
+const TOURNAMENT_STATUSES: readonly TournamentStatus[] = ['registering', 'active', 'finished', 'cancelled'];
 
 function sendError(res: Response, code: ErrorCode, message: string): void {
   const body: ApiError = { error: { code, message } };
@@ -220,7 +220,7 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner, tourname
   r.get('/tournaments', wrap(async (req, res) => {
     const { status, limit } = req.query;
     if (status !== undefined && !TOURNAMENT_STATUSES.includes(status as TournamentStatus)) {
-      throw new GameError('BAD_REQUEST', '`status` must be one of registering, active, finished');
+      throw new GameError('BAD_REQUEST', '`status` must be one of registering, active, finished, cancelled');
     }
     const list = await tournaments.list({ status: status as TournamentStatus | undefined, limit: parseLimit(limit) });
     const body: ListTournamentsResponse = { tournaments: list };
@@ -250,6 +250,11 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner, tourname
 
   r.post('/tournaments/:id/start', wrap(async (req, res) => {
     const body: TournamentDetail = await tournaments.start(req.params.id, await requireAccount(req));
+    res.json(body);
+  }));
+
+  r.post('/tournaments/:id/cancel', wrap(async (req, res) => {
+    const body: TournamentDetail = await tournaments.cancel(req.params.id, await requireAccount(req));
     res.json(body);
   }));
 
