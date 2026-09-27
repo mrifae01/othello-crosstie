@@ -1,0 +1,30 @@
+# Render Blueprint for the API (New → Blueprint in the Render dashboard).
+# The web client deploys separately (Vercel); Postgres and auth are Supabase.
+services:
+  - type: web
+    name: othello-crosstie-api
+    runtime: node
+    plan: free                      # sleeps after ~15 min idle; state is in Postgres, analysis re-queues on boot
+    # Pick the Render region closest to your Supabase project: every move is a DB write.
+    # Can't be changed after creation. Options include oregon, ohio, virginia, frankfurt, singapore.
+    region: oregon
+    branch: main
+    # Installs every workspace (the API imports @othello/shared). No build step: tsx runs the TypeScript.
+    buildCommand: npm ci
+    # Applies pending migrations, then serves REST + Socket.IO. Must stay a single instance:
+    # live games and their locks are held in memory (design-contract.md §7.2: Redis adapter + DB job queue to scale out).
+    startCommand: npm run start -w backend
+    healthCheckPath: /api/health    # 200 only once the API is up; the body reports DB reachability
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Supabase → Connect → Session pooler URI (IPv4; the direct db.<ref> host is IPv6-only),
+      # with ?sslmode=no-verify appended. Prompted for at Blueprint creation; never committed.
+      - key: DATABASE_URL
+        sync: false
+      # Same value as VITE_SUPABASE_URL. The API verifies Supabase access tokens against its JWKS.
+      - key: SUPABASE_URL
+        sync: false
+      # Add once the web app has a URL (not secret):
+      # - key: WEB_ORIGIN
+      #   value: https://<your-app>.vercel.app
