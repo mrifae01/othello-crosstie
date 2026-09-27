@@ -17,7 +17,7 @@ import {
   type Player,
 } from '@othello/shared';
 import * as repo from '../db/gamesRepo';
-import type { GameRecord, GameSnapshotUpdate, MoveInsert } from '../db/gamesRepo';
+import type { GameRecord, GameSnapshotUpdate, MoveInsert, SeatHolder } from '../db/gamesRepo';
 
 /** A domain error that maps directly onto an `ErrorCode` for REST and socket acks. */
 export class GameError extends Error {
@@ -47,7 +47,10 @@ export function toGameSummary(g: GameRecord): GameSummary {
   return {
     gameId: g.id,
     status: g.status,
-    players: { B: { name: g.blackName }, W: g.whiteName === null ? null : { name: g.whiteName } },
+    players: {
+      B: { name: g.blackName, accountId: g.blackAccountId },
+      W: g.whiteName === null ? null : { name: g.whiteName, accountId: g.whiteAccountId },
+    },
     counts: { ...g.counts },
     winner: g.winner,
     endReason: g.endReason,
@@ -162,25 +165,26 @@ export class GameService {
     return { state: toGameState(g), you: this.seatFor(g, token) };
   }
 
-  async createGame(blackName: string): Promise<{ gameId: string; playerToken: string }> {
+  async createGame(black: SeatHolder): Promise<{ gameId: string; playerToken: string }> {
     const playerToken = newToken();
-    const g = await repo.createGame({ blackName, blackTokenHash: hashToken(playerToken), board: initialBoard() });
+    const g = await repo.createGame({ black, blackTokenHash: hashToken(playerToken), board: initialBoard() });
     this.games.set(g.id, g);
     return { gameId: g.id, playerToken };
   }
 
-  async joinGame(gameId: string, whiteName: string): Promise<{ gameId: string; playerToken: string }> {
+  async joinGame(gameId: string, white: SeatHolder): Promise<{ gameId: string; playerToken: string }> {
     return this.withLock(gameId, async () => {
       const g = await this.mustLoad(gameId);
       if (g.status !== 'waiting' || g.whiteTokenHash !== null) {
         throw new GameError('GAME_FULL', 'This game already has two players');
       }
       const playerToken = newToken();
-      const updated = await repo.joinGame(gameId, whiteName, hashToken(playerToken));
+      const updated = await repo.joinGame(gameId, white, hashToken(playerToken));
       if (!updated) throw new GameError('GAME_FULL', 'This game already has two players');
       Object.assign(g, {
         status: updated.status,
         whiteName: updated.whiteName,
+        whiteAccountId: updated.whiteAccountId,
         whiteTokenHash: updated.whiteTokenHash,
         turn: updated.turn,
       });

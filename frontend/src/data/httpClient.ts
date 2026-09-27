@@ -1,17 +1,20 @@
 /**
  * The real GameClient: REST over fetch (design-contract §3.1) plus one Socket.IO
- * connection (§3.2). All URLs are relative; Vite proxies /api and /socket.io to
- * the API, so this works unchanged through an ngrok tunnel on 5173.
+ * connection (§3.2). Locally URLs are relative: Vite proxies /api and /socket.io to
+ * the API, so this works unchanged through an ngrok tunnel on 5173. Deployed, the
+ * web app and API live on different domains and VITE_API_URL points at the API.
  */
 import { io, type Socket } from 'socket.io-client';
 import type {
   Ack,
+  Account,
   AnalysisResult,
   ApiError,
   ClientToServerEvents,
   ErrorCode,
   GameState,
   ListGamesResponse,
+  MeResponse,
   SeatResponse,
   ServerToClientEvents,
   SubscribeResult,
@@ -20,16 +23,31 @@ import { GameClientError, type GameClient, type GameEventHandlers, type GameSubs
 
 const ACK_TIMEOUT_MS = 8000;
 
+/** API origin, e.g. https://api.example.com. Empty = same origin (local dev). */
+const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/+$/, '');
+
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 // ---------- REST ----------
 
-async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+/** Current Supabase access token, or undefined for a guest. Supplied by the composition root. */
+export type AccessTokenProvider = () => Promise<string | undefined>;
+
+async function request<T>(
+  getAccessToken: AccessTokenProvider,
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  body?: unknown,
+): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, {
+    const token = await getAccessToken();
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
+    res = await fetch(`${API_URL}/api${path}`, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -71,14 +89,17 @@ async function emitWithAck<T extends object>(send: () => Promise<Ack<T>>): Promi
   return r;
 }
 
-export function createHttpClient(): GameClient {
+export function createHttpClient(getAccessToken: AccessTokenProvider = async () => undefined): GameClient {
+  const call = <T,>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown) =>
+    request<T>(getAccessToken, method, path, body);
   const entries = new Set<Entry>();
   let socket: TypedSocket | null = null;
 
   /** One connection per tab, created on first use. */
   function getSocket(): TypedSocket {
     if (socket) return socket;
-    const s: TypedSocket = io({ path: '/socket.io' });
+    const opts = { path: '/socket.io' };
+    const s: TypedSocket = API_URL ? io(API_URL, opts) : io(opts);
 
     // A reconnect is a fresh server-side socket in no rooms: re-join every game we
     // are watching and hand the fresh state to its handlers.
@@ -111,12 +132,16 @@ export function createHttpClient(): GameClient {
   }
 
   return {
-    createGame: (name) => request<SeatResponse>('POST', '/games', { name }),
-    joinGame: (gameId, name) => request<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/join`, { name }),
-    getGame: (gameId) => request<GameState>('GET', `/games/${encodeURIComponent(gameId)}`),
+    createGame: (name) => call<SeatResponse>('POST', '/games', { name }),
+    joinGame: (gameId, name) => call<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/join`, { name }),
+    getGame: (gameId) => call<GameState>('GET', `/games/${encodeURIComponent(gameId)}`),
     listFinishedGames: async (limit = 20) =>
-      (await request<ListGamesResponse>('GET', `/games?status=finished&limit=${limit}`)).games,
-    getAnalysis: (gameId) => request<AnalysisResult>('GET', `/games/${encodeURIComponent(gameId)}/analysis`),
+      (await call<ListGamesResponse>('GET', `/games?status=finished&limit=${limit}`)).games,
+    getAnalysis: (gameId) => call<AnalysisResult>('GET', `/games/${encodeURIComponent(gameId)}/analysis`),
+
+    getMe: async (): Promise<Account | null> => (await call<MeResponse>('GET', '/me')).account,
+    claimUsername: async (username) => (await call<MeResponse>('PUT', '/me', { username })).account!,
+    listMyGames: async (limit = 20) => (await call<ListGamesResponse>('GET', `/me/games?limit=${limit}`)).games,
 
     async subscribe(gameId, playerToken, handlers): Promise<GameSubscription> {
       const s = getSocket();

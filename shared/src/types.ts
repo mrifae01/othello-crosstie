@@ -39,7 +39,10 @@ export type EndReason = 'normal' | 'resign';
 export type AnalysisStatus = 'none' | 'pending' | 'running' | 'done' | 'failed';
 
 export interface PlayerInfo {
+  /** Display name: the account's username for signed-in players, free text for guests. */
   name: string;
+  /** The seat's account, or null for a guest seat. */
+  accountId: string | null;
 }
 
 /** Lightweight game header: used in lists, in GameState, and in AnalysisResult. */
@@ -148,6 +151,8 @@ export type ErrorCode =
   | 'NOT_YOUR_TURN'
   | 'ILLEGAL_MOVE'
   | 'BAD_TOKEN'
+  | 'UNAUTHORIZED'     // missing/invalid/expired access token on an account endpoint
+  | 'USERNAME_TAKEN'
   | 'INTERNAL';
 
 /** Body of every non-2xx REST response. */
@@ -168,6 +173,26 @@ export interface SeatResponse {
 export interface ListGamesResponse {
   games: GameSummary[];
 }
+
+// ---------- Accounts ----------
+// Optional. Identity comes from Supabase Auth (a bearer access token on REST calls);
+// the account row itself lives in our Postgres. Guests never touch these endpoints.
+
+export interface Account {
+  /** Supabase auth user id (the JWT `sub`). */
+  id: string;
+  /** 3..20 chars of [A-Za-z0-9_], unique case-insensitively. Used as the seat name in games. */
+  username: string;
+  createdAt: string;            // ISO 8601
+}
+
+/** GET /api/me. `account` is null when signed in but no username has been claimed yet. */
+export interface MeResponse {
+  account: Account | null;
+}
+
+/** PUT /api/me: claim (or change) the username. */
+export interface ClaimUsernameRequest { username: string }
 
 // ---------- Socket.IO ----------
 

@@ -1,14 +1,34 @@
 import { createServer } from 'node:http';
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { Server } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@othello/shared';
-import { PORT } from './config';
+import { PORT, WEB_ORIGINS } from './config';
 import { runMigrations } from './db/migrate';
 import { pool } from './db/pool';
 import { GameService } from './game/GameService';
 import { apiRouter } from './http/routes';
 import { AnalysisRunner } from './analysis/AnalysisRunner';
 import { registerSocketHandlers, roomFor } from './socket/handlers';
+
+/**
+ * CORS for the deployed web app on its own domain. Bearer tokens, not cookies, so no credentials.
+ * Unlisted origins get no CORS headers, and the browser blocks them.
+ */
+function allowWebOrigins(req: Request, res: Response, next: NextFunction): void {
+  const origin = req.headers.origin;
+  if (origin && WEB_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '600');
+  }
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+}
 
 async function main(): Promise<void> {
   // Idempotent; also run by `npm start`, but this makes `npm run dev -w backend` self-sufficient.
@@ -17,7 +37,9 @@ async function main(): Promise<void> {
   const games = new GameService();
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
+  const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+    cors: WEB_ORIGINS.length ? { origin: WEB_ORIGINS } : undefined,
+  });
   registerSocketHandlers(io, games);
 
   const analysis = new AnalysisRunner(games, {
@@ -26,7 +48,7 @@ async function main(): Promise<void> {
   });
 
   app.disable('x-powered-by');
-  app.use('/api', apiRouter(games, analysis));
+  app.use('/api', allowWebOrigins, apiRouter(games, analysis));
 
   httpServer.listen(PORT, () => console.log(`[api] listening on http://localhost:${PORT}`));
 

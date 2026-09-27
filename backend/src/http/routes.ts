@@ -6,9 +6,12 @@ import type {
   GameState,
   GameStatus,
   ListGamesResponse,
+  MeResponse,
   SeatResponse,
 } from '@othello/shared';
-import { listGames, pingDb } from '../db/gamesRepo';
+import { listGames, pingDb, type SeatHolder } from '../db/gamesRepo';
+import { getAccount, upsertAccount } from '../db/accountsRepo';
+import { authEnabled, verifyAccessToken, type AuthUser } from '../auth/verifyToken';
 import type { AnalysisRunner } from '../analysis/AnalysisRunner';
 import { GameError, toGameSummary, type GameService } from '../game/GameService';
 
@@ -20,6 +23,8 @@ const STATUS_FOR: Record<ErrorCode, number> = {
   NOT_YOUR_TURN: 409,
   ILLEGAL_MOVE: 400,
   BAD_TOKEN: 403,
+  UNAUTHORIZED: 401,
+  USERNAME_TAKEN: 409,
   INTERNAL: 500,
 };
 
@@ -40,6 +45,57 @@ function parseName(body: unknown): string {
   return name;
 }
 
+const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+function parseUsername(body: unknown): string {
+  const raw = (body as { username?: unknown } | null)?.username;
+  const username = typeof raw === 'string' ? raw.trim() : '';
+  if (!USERNAME_RE.test(username)) {
+    throw new GameError('BAD_REQUEST', '`username` must be 3–20 letters, digits or underscores');
+  }
+  return username;
+}
+
+function parseLimit(limit: unknown, fallback = 20): number {
+  if (limit === undefined) return fallback;
+  const n = Number(limit);
+  if (typeof limit !== 'string' || !Number.isInteger(n) || n < 1) {
+    throw new GameError('BAD_REQUEST', '`limit` must be a positive integer');
+  }
+  return Math.min(n, 50);
+}
+
+/**
+ * The caller behind `Authorization: Bearer <supabase access token>`, or null with no header.
+ * A header that is present but fails verification is an error, never a silent downgrade to guest.
+ */
+async function optionalUser(req: Request): Promise<AuthUser | null> {
+  const header = req.headers.authorization;
+  if (!header) return null;
+  if (!authEnabled) throw new GameError('UNAUTHORIZED', 'Accounts are not enabled on this server');
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const user = token ? await verifyAccessToken(token) : null;
+  if (!user) throw new GameError('UNAUTHORIZED', 'Invalid or expired session; sign in again');
+  return user;
+}
+
+async function requireUser(req: Request): Promise<AuthUser> {
+  const user = await optionalUser(req);
+  if (!user) throw new GameError('UNAUTHORIZED', 'Sign in required');
+  return user;
+}
+
+/**
+ * Who takes the seat. Signed-in players with a claimed username sit as that account, and the
+ * body's `name` is ignored so no one can pose as a registered user. Everyone else is a guest.
+ */
+async function seatHolderFor(req: Request): Promise<SeatHolder> {
+  const user = await optionalUser(req);
+  const account = user && (await getAccount(user.userId));
+  if (account) return { name: account.username, accountId: account.id };
+  return { name: parseName(req.body), accountId: null };
+}
+
 type Handler = (req: Request, res: Response) => Promise<void>;
 const wrap = (h: Handler) => (req: Request, res: Response, next: NextFunction) => h(req, res).catch(next);
 
@@ -52,15 +108,13 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner): express
   }));
 
   r.post('/games', wrap(async (req, res) => {
-    const name = parseName(req.body);
-    const { gameId, playerToken } = await games.createGame(name);
+    const { gameId, playerToken } = await games.createGame(await seatHolderFor(req));
     const body: SeatResponse = { gameId, color: 'B', playerToken };
     res.status(201).json(body);
   }));
 
   r.post('/games/:id/join', wrap(async (req, res) => {
-    const name = parseName(req.body);
-    const { gameId, playerToken } = await games.joinGame(req.params.id, name);
+    const { gameId, playerToken } = await games.joinGame(req.params.id, await seatHolderFor(req));
     const body: SeatResponse = { gameId, color: 'W', playerToken };
     res.json(body);
   }));
@@ -70,15 +124,7 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner): express
     if (status !== undefined && !GAME_STATUSES.includes(status as GameStatus)) {
       throw new GameError('BAD_REQUEST', '`status` must be one of waiting, active, finished');
     }
-    let n = 20;
-    if (limit !== undefined) {
-      n = Number(limit);
-      if (typeof limit !== 'string' || !Number.isInteger(n) || n < 1) {
-        throw new GameError('BAD_REQUEST', '`limit` must be a positive integer');
-      }
-      n = Math.min(n, 50);
-    }
-    const rows = await listGames({ status: status as GameStatus | undefined, limit: n });
+    const rows = await listGames({ status: status as GameStatus | undefined, limit: parseLimit(limit) });
     const body: ListGamesResponse = { games: rows.map(toGameSummary) };
     res.json(body);
   }));
@@ -90,6 +136,30 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner): express
 
   r.get('/games/:id/analysis', wrap(async (req, res) => {
     const body: AnalysisResult = await analysis.getAnalysis(req.params.id);
+    res.json(body);
+  }));
+
+  // ---------- accounts ----------
+
+  r.get('/me', wrap(async (req, res) => {
+    const user = await requireUser(req);
+    const body: MeResponse = { account: await getAccount(user.userId) };
+    res.json(body);
+  }));
+
+  r.put('/me', wrap(async (req, res) => {
+    const user = await requireUser(req);
+    const account = await upsertAccount(user.userId, parseUsername(req.body));
+    if (!account) throw new GameError('USERNAME_TAKEN', 'That username is taken');
+    const body: MeResponse = { account };
+    res.json(body);
+  }));
+
+  /** The caller's finished games, newest first: the seed of cross-game coaching. */
+  r.get('/me/games', wrap(async (req, res) => {
+    const user = await requireUser(req);
+    const rows = await listGames({ status: 'finished', accountId: user.userId, limit: parseLimit(req.query.limit) });
+    const body: ListGamesResponse = { games: rows.map(toGameSummary) };
     res.json(body);
   }));
 

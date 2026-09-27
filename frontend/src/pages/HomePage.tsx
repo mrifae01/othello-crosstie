@@ -4,27 +4,36 @@ import type { GameSummary } from '@othello/shared';
 import { useGameClient } from '../data/ClientContext';
 import { setSeatToken } from '../data/seatStorage';
 import { useToasts } from '../components/Toasts';
-import { NameForm } from '../components/NameForm';
+import { SeatForm } from '../components/SeatForm';
+import { SignInDialog } from '../components/AccountMenu';
+import { useAuth } from '../auth/AuthContext';
 import { errorText, fmtDate, resultText } from '../format';
 
 export function HomePage() {
   const client = useGameClient();
   const toasts = useToasts();
   const navigate = useNavigate();
+  const { state: auth, account } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
   const [recent, setRecent] = useState<GameSummary[] | null>(null);
   const [recentError, setRecentError] = useState<string | null>(null);
+  // Signed in: your games. Accounts not configured at all (zero-config run, mock mode): every
+  // recent game, so the panel isn't empty. Any other state shows a prompt instead of a list.
+  const source = account ? 'mine' : auth.status === 'disabled' ? 'all' : null;
 
   useEffect(() => {
+    setRecent(null);
+    setRecentError(null);
+    if (!source) return;
     let live = true;
-    client
-      .listFinishedGames(20)
+    (source === 'mine' ? client.listMyGames(20) : client.listFinishedGames(20))
       .then((games) => live && setRecent(games))
       .catch((e) => live && setRecentError(errorText(e)));
     return () => {
       live = false;
     };
-  }, [client]);
+  }, [client, source, account?.id]);
 
   async function create(name: string) {
     setBusy(true);
@@ -46,15 +55,28 @@ export function HomePage() {
           Start a game and send the invite link. When it ends, the engine reviews every move: where the game
           turned, what you should have played, and how accurate each player was.
         </p>
-        <NameForm label="Your name" submitLabel="Create game" busy={busy} onSubmit={create} />
+        <SeatForm submitLabel="Create game" busy={busy} onSubmit={create} />
         <p className="muted small">You play Black and move first. Your opponent takes White from the link.</p>
       </section>
 
       <section className="panel recent">
-        <h2>Recent games</h2>
+        <h2>{source === 'all' ? 'Recent games' : 'Your recent games'}</h2>
+        {auth.status === 'guest' && (
+          <div className="recent-prompt">
+            <p className="muted">Sign in to save your games and come back to their reviews any time.</p>
+            <button type="button" className="btn btn-primary" onClick={() => setSigningIn(true)}>
+              Sign in
+            </button>
+            {signingIn && <SignInDialog onClose={() => setSigningIn(false)} />}
+          </div>
+        )}
+        {auth.status === 'needsUsername' && <p className="muted">Pick a username to start saving your games.</p>}
+        {auth.status === 'error' && <p className="error-text">{auth.message}</p>}
         {recentError && <p className="error-text">{recentError}</p>}
-        {!recent && !recentError && <p className="muted">Loading…</p>}
-        {recent && recent.length === 0 && <p className="muted">No finished games yet.</p>}
+        {(auth.status === 'loading' || (source && !recent && !recentError)) && <p className="muted">Loading…</p>}
+        {recent && recent.length === 0 && (
+          <p className="muted">{source === 'mine' ? 'Finish a game and it shows up here with its review.' : 'No finished games yet.'}</p>
+        )}
         {recent && recent.length > 0 && (
           <ul className="game-list">
             {recent.map((g) => (

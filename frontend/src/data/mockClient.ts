@@ -118,7 +118,7 @@ export function createMockClient(): MockClient {
         state: {
           gameId,
           status: 'waiting',
-          players: { B: { name: n }, W: null },
+          players: { B: { name: n, accountId: null }, W: null },
           counts: countDiscs(board),
           winner: null,
           endReason: null,
@@ -142,7 +142,7 @@ export function createMockClient(): MockClient {
       if (g.state.status !== 'waiting' || g.state.players.W) throw new GameClientError('GAME_FULL', 'Game is full');
       const token = randomToken();
       g.tokens.W = token;
-      g.state.players.W = { name: n };
+      g.state.players.W = { name: n, accountId: null };
       g.state.status = 'active';
       g.state.turn = 'B';
       g.state.legalMoves = getLegalMoves(g.state.board, 'B');
@@ -231,6 +231,17 @@ export function createMockClient(): MockClient {
       finish(g, opponent(seat), 'resign');
       broadcast(g);
       void runAnalysis(g);
+    },
+
+    // Mock mode is guest-only (main.tsx never enables auth with it), so these are unreachable.
+    async getMe() {
+      return null;
+    },
+    async claimUsername() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
+    async listMyGames() {
+      return [];
     },
   };
 

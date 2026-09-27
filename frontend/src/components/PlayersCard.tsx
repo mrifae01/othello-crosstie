@@ -17,6 +17,7 @@ export function PlayersCard({ game, turn, you = null }: PlayersCardProps) {
             <span className={`disc disc-${p} mini`} />
             <span className="player-name">
               {info ? info.name : <span className="muted">Waiting for player…</span>}
+              {info && !info.accountId && <span className="guest-tag">guest</span>}
               {you === p && <span className="you-tag">you</span>}
             </span>
             <span className="player-count">{game.counts[p]}</span>

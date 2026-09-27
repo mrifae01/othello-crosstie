@@ -82,7 +82,10 @@ function buildState(spec: FixtureSpec): GameState {
   return {
     gameId: spec.id,
     status: spec.status,
-    players: { B: { name: spec.black }, W: spec.white ? { name: spec.white } : null },
+    players: {
+      B: { name: spec.black, accountId: null },
+      W: spec.white ? { name: spec.white, accountId: null } : null,
+    },
     counts: countDiscs(board),
     winner,
     endReason: finished ? (spec.endReason ?? 'normal') : null,

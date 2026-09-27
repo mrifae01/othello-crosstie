@@ -23,6 +23,8 @@ export interface GameRecord {
   status: GameStatus;
   blackName: string;
   whiteName: string | null;
+  blackAccountId: string | null;
+  whiteAccountId: string | null;
   blackTokenHash: string;
   whiteTokenHash: string | null;
   board: Board;
@@ -58,6 +60,8 @@ interface GameRow {
   status: GameStatus;
   black_name: string;
   white_name: string | null;
+  black_account_id: string | null;
+  white_account_id: string | null;
   black_token_hash: string;
   white_token_hash: string | null;
   board: string;
@@ -84,6 +88,8 @@ function toRecord(row: GameRow, moves: PlayedMove[]): GameRecord {
     status: row.status,
     blackName: row.black_name,
     whiteName: row.white_name,
+    blackAccountId: row.black_account_id,
+    whiteAccountId: row.white_account_id,
     blackTokenHash: row.black_token_hash,
     whiteTokenHash: row.white_token_hash,
     board: boardFromString(row.board),
@@ -108,11 +114,17 @@ export function isValidGameId(id: unknown): id is string {
   return typeof id === 'string' && UUID_RE.test(id);
 }
 
-export async function createGame(input: { blackName: string; blackTokenHash: string; board: Board }): Promise<GameRecord> {
+/** Who is taking a seat: a display name, plus the account for signed-in players (null for guests). */
+export interface SeatHolder {
+  name: string;
+  accountId: string | null;
+}
+
+export async function createGame(input: { black: SeatHolder; blackTokenHash: string; board: Board }): Promise<GameRecord> {
   const { rows } = await pool.query<GameRow>(
-    `INSERT INTO games (black_name, black_token_hash, board)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [input.blackName, input.blackTokenHash, boardToString(input.board)],
+    `INSERT INTO games (black_name, black_account_id, black_token_hash, board)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [input.black.name, input.black.accountId, input.blackTokenHash, boardToString(input.board)],
   );
   return toRecord(rows[0], []);
 }
@@ -121,13 +133,14 @@ export async function createGame(input: { blackName: string; blackTokenHash: str
  * Claims the White seat, but only if the game is still waiting with no White.
  * Returns the updated record, or null if the seat couldn't be claimed.
  */
-export async function joinGame(id: string, whiteName: string, whiteTokenHash: string): Promise<GameRecord | null> {
+export async function joinGame(id: string, white: SeatHolder, whiteTokenHash: string): Promise<GameRecord | null> {
   const { rows } = await pool.query<GameRow>(
     `UPDATE games
-        SET white_name = $2, white_token_hash = $3, status = 'active', turn = 'B', started_at = now()
+        SET white_name = $2, white_account_id = $3, white_token_hash = $4,
+            status = 'active', turn = 'B', started_at = now()
       WHERE id = $1 AND status = 'waiting' AND white_token_hash IS NULL
       RETURNING *`,
-    [id, whiteName, whiteTokenHash],
+    [id, white.name, white.accountId, whiteTokenHash],
   );
   return rows[0] ? toRecord(rows[0], []) : null;
 }
@@ -143,14 +156,18 @@ export async function loadGame(id: string): Promise<GameRecord | null> {
   return toRecord(game.rows[0], moves.rows.map(toPlayedMove));
 }
 
-/** Game headers only (moves: []), newest finished first, then newest created. */
-export async function listGames(opts: { status?: GameStatus; limit: number }): Promise<GameRecord[]> {
+/**
+ * Game headers only (moves: []), newest finished first, then newest created.
+ * `accountId` narrows to games where that account holds either seat.
+ */
+export async function listGames(opts: { status?: GameStatus; accountId?: string; limit: number }): Promise<GameRecord[]> {
   const { rows } = await pool.query<GameRow>(
     `SELECT * FROM games
       WHERE ($1::text IS NULL OR status = $1)
+        AND ($2::uuid IS NULL OR black_account_id = $2 OR white_account_id = $2)
       ORDER BY finished_at DESC NULLS LAST, created_at DESC
-      LIMIT $2`,
-    [opts.status ?? null, opts.limit],
+      LIMIT $3`,
+    [opts.status ?? null, opts.accountId ?? null, opts.limit],
   );
   return rows.map((r) => toRecord(r, []));
 }

@@ -6,7 +6,7 @@ import { setSeatToken } from '../data/seatStorage';
 import { useLiveGame } from '../data/useLiveGame';
 import { Board } from '../components/Board';
 import { MoveList } from '../components/MoveList';
-import { NameForm } from '../components/NameForm';
+import { SeatForm } from '../components/SeatForm';
 import { PlayersCard } from '../components/PlayersCard';
 import { AnalysisBar } from '../components/AnalysisBar';
 import { useToasts } from '../components/Toasts';
@@ -120,7 +120,7 @@ function GameView({ gameId }: { gameId: string }) {
               <p className="muted small">
                 {state.players.B.name} is waiting. You'll play White.
               </p>
-              <NameForm label="Your name" submitLabel="Join as White" busy={joining} prefill={false} onSubmit={join} />
+              <SeatForm submitLabel="Join as White" busy={joining} prefill={false} onSubmit={join} />
             </>
           )}
 

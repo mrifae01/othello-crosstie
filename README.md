@@ -62,9 +62,16 @@
 
 Finished architecture and planning. Basic game implementation along with initial game analyzation.
 
-### Session 2 —
+### Session 2 — 9/27, 9:50AM 
 
-<!-- TODO -->
+**Goals:** 
+First hour:
+With the basics completed, review and ensure scability - accounts + tournaments. 
+Integrate supabase for account creation and add a "tournament" tab/drop down for users to create and join tournaments.
+
+Second hour:
+Spend 30 mins focusing on the UI and making it more than just a basic app.
+Spend the remaining time on hosting this on Vercel so that in the next working session I can embed real AI functionality with my API without having to share the .env.
 
 ---
 

@@ -9,6 +9,8 @@ import { createMockClient, type MockClient } from './data/mockClient';
 import { MockDevBar } from './mocks/MockDevBar';
 import { ToastProvider } from './components/Toasts';
 import { LeaveGuardProvider } from './components/LeaveGuard';
+import { AuthProvider } from './auth/AuthContext';
+import { supabase } from './auth/supabase';
 import './styles.css';
 
 // Composition root: the only place that chooses a GameClient implementation.
@@ -27,19 +29,24 @@ function mockMode(): boolean {
 }
 
 const mock: MockClient | null = mockMode() ? createMockClient() : null;
-const client: GameClient = mock ?? createHttpClient();
+// Accounts are real-backend only; mock mode stays guest-only.
+const auth = mock ? null : supabase;
+const client: GameClient =
+  mock ?? createHttpClient(async () => (await auth?.auth.getSession())?.data.session?.access_token);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <GameClientProvider client={client}>
-      <ToastProvider>
-        <LeaveGuardProvider>
-          <BrowserRouter>
-            <App />
-            {mock && <MockDevBar client={mock} />}
-          </BrowserRouter>
-        </LeaveGuardProvider>
-      </ToastProvider>
+      <AuthProvider supabase={auth}>
+        <ToastProvider>
+          <LeaveGuardProvider>
+            <BrowserRouter>
+              <App />
+              {mock && <MockDevBar client={mock} />}
+            </BrowserRouter>
+          </LeaveGuardProvider>
+        </ToastProvider>
+      </AuthProvider>
     </GameClientProvider>
   </StrictMode>,
 );

@@ -84,3 +84,26 @@ The corner weight was raised from 8 to 12 because at 8 an obviously free corner 
 - The smoke game has 25 best and 11 blunders out of 64 plies.
 - Accuracy lands at 50–70% for random or first-legal-move play.
 - Neither "everything is a blunder" nor "nothing is" occurs.
+
+## Session 2: optional accounts (Supabase Auth)
+
+The contract cut accounts (§7.2) and planned them for Milestone 2 (§7.1). They were pulled forward because cross-game coaching and tournaments both need a stable identity. Guest play is unchanged.
+
+| # | Area | What the contract says | What was built | Why |
+|---|---|---|---|---|
+| A1 | Identity | Anonymous seat tokens only (§0b) | Seat tokens are **still** the in-game credential for everyone. Accounts are optional: Supabase Auth issues the session, and the API verifies its JWT locally via JWKS (`jose`). Legacy HS256 projects are supported via `SUPABASE_JWT_SECRET`. | Guests and account holders share one game flow, and the socket layer is untouched. Local verification means no per-request call to Supabase. |
+| A2 | Schema | §7.1 planned `players` + `*_player_id` **replacing** `*_token_hash` | `002_accounts.sql`: an `accounts` table (id = Supabase user id, unique case-insensitive `username`), plus nullable `black_account_id`/`white_account_id` **alongside** the token hashes | Named `accounts` because `Player` already means `'B' \| 'W'`. The token hashes stay because guests still exist. Old games read as guest seats. |
+| A3 | Where auth data lives | — | Only identity lives in Supabase. The `accounts` row and all game data stay in our Postgres. | `npm start` still works with zero keys (guest-only mode), and the backend stays the single authority. In production, `DATABASE_URL` can point at Supabase's Postgres. |
+| A4 | `types.ts` | Frozen | Added `PlayerInfo.accountId`, `Account`, `MeResponse`, `ClaimUsernameRequest`, and `ErrorCode` values `UNAUTHORIZED` (401) and `USERNAME_TAKEN` (409) | These are additive changes. The mock fixtures were updated to match. |
+| A5 | Seat name | Free-text `name` on create/join | For a signed-in caller with a username, the server uses the username and **ignores** the body's `name`. Guests are unchanged. | Stops anyone posing as a registered player. That matters once results feed profiles and tournaments. |
+| A6 | Bad bearer token | — | A present-but-invalid `Authorization` header → 401 `UNAUTHORIZED`. It never silently downgrades to a guest. | Otherwise a game could silently fail to reach the player's profile. |
+| A7 | New endpoints | — | `GET /api/me`, `PUT /api/me` `{username}`, `GET /api/me/games?limit=` (finished games where the account holds either seat) | `me/games` is the first cross-game query and the seed for Milestone 2 coaching. |
+
+## Session 2: deployment prep (Supabase Postgres, split web/API hosting)
+
+| # | Area | What the contract says | What was built | Why |
+|---|---|---|---|---|
+| D1 | Data API exposure | — | `003_enable_rls.sql`: RLS on for every table, with no policies | Supabase exposes `public` over its Data API to anyone holding the browser-shipped publishable key. Our API connects as the table owner, so it isn't affected by RLS. No-op on local Postgres. |
+| D2 | DB TLS | — | `DATABASE_CA_CERT` (PEM or path) → verified TLS. `sslmode` etc. are stripped from `DATABASE_URL` when it's set. | pg treats `sslmode=require` as verify-full, and URL SSL params override the `ssl` option. Verifying against Supabase's CA beats `rejectUnauthorized: false`. |
+| D3 | Same-origin assumption (§0b) | Relative URLs via the Vite proxy | Optional `VITE_API_URL` (REST + socket) and `WEB_ORIGIN` (CORS allowlist for Express and Socket.IO). Both unset locally, so dev and ngrok are unchanged. | The web app (static host) and the API (long-running Node host) live on different domains once deployed. |
+| D4 | Runtime deps | `tsx` as a dev dependency | `tsx` moved to `dependencies` | The API runs through `tsx` in production, and hosts may skip dev dependencies. |

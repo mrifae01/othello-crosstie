@@ -1,5 +1,6 @@
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useLeave } from './components/LeaveGuard';
+import { AccountMenu } from './components/AccountMenu';
 import { HomePage } from './pages/HomePage';
 import { GamePage } from './pages/GamePage';
 import { ReviewPage } from './pages/ReviewPage';
@@ -38,7 +39,9 @@ export function App() {
           </Link>
           <span className="tagline">Play a friend, then see where the game turned.</span>
         </div>
-        <div className="topbar-side" />
+        <div className="topbar-side">
+          <AccountMenu />
+        </div>
       </header>
       <main>
         <Routes>

@@ -6,6 +6,7 @@
  * never a concrete implementation.
  */
 import type {
+  Account,
   AnalysisProgressPayload,
   AnalysisReadyPayload,
   AnalysisResult,
@@ -49,7 +50,7 @@ export interface GameSubscription {
 }
 
 export interface GameClient {
-  /** POST /api/games → color 'B'. */
+  /** POST /api/games → color 'B'. Signed in with a username, the server seats the account and ignores `name`. */
   createGame(name: string): Promise<SeatResponse>;
   /** POST /api/games/:id/join → color 'W'. */
   joinGame(gameId: string, name: string): Promise<SeatResponse>;
@@ -69,4 +70,13 @@ export interface GameClient {
   move(gameId: string, playerToken: string, square: Square): Promise<void>;
   /** `game:resign`. */
   resign(gameId: string, playerToken: string): Promise<void>;
+
+  // ---- Accounts (only called while signed in; see auth/AuthContext) ----
+
+  /** GET /api/me. null = signed in but no username claimed yet. */
+  getMe(): Promise<Account | null>;
+  /** PUT /api/me. Fails with USERNAME_TAKEN. */
+  claimUsername(username: string): Promise<Account>;
+  /** GET /api/me/games: the signed-in account's finished games, newest first. */
+  listMyGames(limit?: number): Promise<GameSummary[]>;
 }

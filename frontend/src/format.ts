@@ -16,6 +16,8 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   NOT_YOUR_TURN: "It's not your turn.",
   ILLEGAL_MOVE: "That move isn't legal.",
   BAD_TOKEN: "You don't hold a seat in this game.",
+  UNAUTHORIZED: 'Your session has expired. Sign in again.',
+  USERNAME_TAKEN: 'That username is taken.',
   INTERNAL: 'Something went wrong on the server. Try again.',
 };
 

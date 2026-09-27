@@ -5,6 +5,8 @@ const API = 'http://localhost:3001';
 
 export default defineConfig({
   plugins: [react()],
+  // One root .env for the API and the web client (only VITE_* values reach the browser).
+  envDir: '..',
   server: {
     port: 5173,
     strictPort: true,

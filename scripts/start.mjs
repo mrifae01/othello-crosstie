@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+// Same root .env the API and web client read, so DATABASE_URL set there skips Docker here too.
+try {
+  process.loadEnvFile(resolve(root, '.env'));
+} catch {
+  // No .env: all settings are optional.
+}
+
 function run(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { cwd: root, stdio: 'inherit', ...opts });
 }
