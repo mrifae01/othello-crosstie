@@ -26,5 +26,5 @@ services:
       - key: SUPABASE_URL
         sync: false
       # Add once the web app has a URL (not secret):
-      # - key: WEB_ORIGIN
-      #   value: https://<your-app>.vercel.app
+      - key: WEB_ORIGIN
+        value: https://othello-crosstie-frontend.vercel.app/
