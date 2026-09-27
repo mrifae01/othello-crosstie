@@ -1,0 +1,2319 @@
+
+❯ With basic frontend and backend done for this project, I want to look at what
+  it would take to create a tournaments tab for users to be able to
+  create/join tournaments. While you are planning this out, please note that
+  there is a seperate session running looking into what it will take in order
+  to integrate supabase to this application so user creation is possible.
+
+⏺ I'll start by getting a feel for the codebase structure.
+
+⏺ Bash(git ls-files | grep -v -E 'lock|\.png|\.svg|\.ico' | head -100 && cat
+      README.md | head -80 && git diff README.md)
+  ⎿  (No output)
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ The shared types already reference Supabase accounts, but toGameSummary
+  doesn't set accountId. The other session may be editing right now, so I'll
+  check.
+
+⏺ Bash(git status --short && git diff --stat && ls docs; grep -n -i -E
+      'tournament|account|supabase' design-contract.md docs/*.md | head -40)
+  ⎿  (No output)
+
+⏺ Bash(cat backend/migrations/002_accounts.sql; ls backend/src/auth; head -80
+      backend/src/auth/*; git diff backend/src/config.ts shared/src/types.ts;
+      sed -n 590,620p d…)
+  ⎿  (No output)
+
+⏺ Now a quick look at the frontend's routing and home page, so the plan fits the
+  existing UI.
+
+⏺ Bash(cat frontend/src/App.tsx; sed -n 1,60p frontend/src/pages/HomePage.tsx;
+      grep -n "export\|async" frontend/src/data/GameClient.ts | head -30; grep
+      -n "async\|^  […)
+  ⎿  (No output)
+
+⏺ I've looked through the code. One thing matters for sequencing: the Supabase
+  session is already writing to the working tree. It has uncommitted changes in
+  shared/src/types.ts (Account, PlayerInfo.accountId, UNAUTHORIZED), a new
+  002_accounts.sql (accounts table plus games.black_account_id /
+  white_account_id), backend/src/auth/verifyToken.ts, and GameService.ts (a new
+  SeatHolder). Tournaments need all of that, so the plan below builds on top of
+  it.
+
+  Tournaments plan
+
+  Scope: what to build first
+
+  - Format: round-robin, capped at 8 players. Everyone plays everyone, so all
+    pairings can be generated when the tournament starts. There's no
+    round-by-round pairing step and no waiting for a round to finish. Swiss is
+    the Othello standard and the design contract lists it for Milestone 3, but
+    it needs per-round pairing logic, byes and tie-break rules. Leave it for
+    later.
+  - An account is required to create or join. Guests can still view a tournament
+    page and watch its games through the existing spectator links. Tying
+    entries to accounts is most of the point of having them.
+  - Lifecycle: registering → active (the creator presses Start, minimum 2
+    players) → finished (every paired game is finished).
+  - Standings are computed, not stored. Win = 1, draw = ½, with disc
+    differential as the tie-break, all derived with SQL over games. There's no
+    score column that can drift out of sync.
+
+  Backend
+
+  003_tournaments.sql (002 is taken by the accounts migration)
+  - tournaments: id, name, created_by → accounts, status, max_players,
+    created_at, started_at, finished_at
+  - tournament_entries: (tournament_id, account_id) primary key, joined_at
+  - games: add tournament_id (nullable FK) and round (nullable), plus an index
+    on tournament_id
+  - Make black_token_hash nullable. This follows from the design choice below.
+
+  The one real design choice: how players get into a paired game. Today a seat
+  token is created at create/join time and only its hash is stored, so the
+  server can't hand the token to a player later. The fix is to create tournament
+  games with both *_account_id columns filled in and no token hashes. A player
+  then calls POST /api/tournaments/:id/games/:gameId/seat with their bearer
+  token. The server checks that the account owns a seat in that game, then
+  issues (or rotates) that seat's token. The game becomes active once both seats
+  are claimed. The benefit is that the socket layer, the move logic and the
+  leave guard stay exactly as they are.
+
+  TournamentService, tournamentsRepo.ts, routes
+  - POST /tournaments (auth) · GET /tournaments?status= · GET /tournaments/:id
+    (roster, schedule, standings)
+  - POST /tournaments/:id/join · DELETE /tournaments/:id/join (only while
+    registering) · POST /tournaments/:id/start (creator only). Start runs the
+    circle method and inserts all games in one transaction.
+  - A GameService.onState listener: when a game with a tournament_id finishes
+    and no games in that tournament remain unfinished, mark the tournament
+    finished. Optionally emit tournament:state to a tournament:<id> socket room.
+    For the first version, refetching the page is enough.
+  - New error codes: TOURNAMENT_NOT_FOUND, TOURNAMENT_FULL, TOURNAMENT_NOT_OPEN,
+    FORBIDDEN, ALREADY_JOINED
+
+  Shared types
+
+  Add TournamentSummary, TournamentDetail (entries, pairings with
+  gameId/round/players/result, standings), the request DTOs, and the error codes
+  above. types.ts is marked as a frozen contract, so add an entry to
+  docs/contract-deviations.md and update §7.1 of the design contract.
+
+  Frontend
+
+  - A Tournaments tab in the topbar. The right side (topbar-side) is currently
+    empty, but the accounts session will probably put sign-in there, so agree on
+    the layout with that session.
+  - /tournaments lists tournaments (registering, live, finished), with a Create
+    form for signed-in users.
+  - /tournaments/:id shows the roster, Join/Leave, and a Start button for the
+    creator. It also has a schedule grouped by round, with a Play button (claims
+    the seat, stores the token with setSeatToken, then navigates to /game/:id),
+    Watch and Review links, and a standings table.
+  - Add the new methods to the GameClient interface, httpClient (sends the
+    bearer token) and mockClient/fixtures, so the pages can be built before the
+    backend is done.
+
+  Coordinating with the Supabase session
+
+  These files overlap: shared/src/types.ts, GameService.ts, routes.ts, App.tsx,
+  httpClient.ts, and the migration numbering. Tournaments need three things from
+  that session:
+  1. A requireAccount middleware that sets req.account (verified JWT plus a
+     claimed username).
+  2. createGame/joinGame writing *_account_id, and toGameSummary filling in
+     accountId.
+  3. A frontend hook that returns the current access token.
+
+  My recommendation: let the accounts work land and be committed first. Then
+  build tournaments on a branch or worktree from that commit. Running both
+  sessions in the same working tree will cause edit collisions in types.ts and
+  GameService.ts. Until then, the shared types and the mock-client UI can be
+  drafted without conflict.
+
+  Estimate and risk
+
+  - Roughly 2–2.5 hours: backend and migration ~1h, UI with mocks ~45m, wiring
+    and testing ~30m. Your README gives accounts and tournaments one hour
+    together, so tournaments will probably take most of the second hour too.
+  - Known gap: a player who never shows up leaves a game stuck, which blocks the
+    tournament from finishing. For v1, give the creator a "forfeit this game"
+    action. Clocks and automatic forfeits stay on the roadmap.
+
+  Decisions for you:
+  - Round-robin as the first format, or go straight to Swiss?
+  - Is 8 the right player cap? At 8, a tournament is 28 games.
+  - Should guests be allowed to enter, or is an account required?
+
+❯ <ide_opened_file>The user opened the file
+  /Users/mitchelrifae/Desktop/Repos/othello-crosstie/.env in the IDE. This may
+  or may not be related to the current task.</ide_opened_file>
+
+❯ Let's continue to plan this out while the other session is finishing the
+  supabase integration...
+
+  For decisions:
+  1 - make this a single elimiation playoff style tournament
+  2 - 8 players is a fine cap to start
+  3 - Account creation should be required to join or create a tournament
+
+⏺ I'll check how far the accounts session has gotten, since the bracket design
+  depends on what it exposes.
+
+⏺ Bash(git status --short && git log --oneline -3 && grep -n "SeatHolder" -A6
+      backend/src/game/GameService.ts | head -30; ls backend/src/auth; grep -rn
+      "requireA\|req.…)
+  ⎿  (No output)
+
+⏺ Bash(git diff backend/src/http/routes.ts | head -120; ls frontend/src/auth;
+      grep -n "export" frontend/src/auth/* | head -20)
+  ⎿  (No output)
+
+⏺ I've updated the plan for single elimination. The accounts session has
+  progressed since my first pass. Routes now have requireUser() and
+  optionalUser(), GameService takes a SeatHolder { name, accountId }, there's an
+  accountsRepo.getAccount(), and the frontend has useAuth(). Tournaments can
+  use all of these as they are. The one extra piece is a small requireAccount()
+  helper: a verified user with a claimed username.
+
+  Tournaments plan v2: single elimination
+
+  Format rules
+
+  - Bracket size is the next power of two at or above the entrant count (2, 4 or
+    8; the cap is 8), with 2 to 8 players. Empty slots are byes, and a player
+    with a bye advances automatically.
+  - Seeding is a random shuffle when the creator presses Start, placed into
+    standard bracket positions (1v8, 4v5, 2v7, 3v6). Byes go to the top seeds,
+    so two byes never meet in round 1. If someone drops out before Start, the
+    rest still works.
+  - Colors: the player from the upper slot plays Black in each match.
+  - Draws: a 32–32 result can't be broken on disc count, so the players replay
+    with colors swapped until someone wins. Resigning counts as a loss.
+  - Finish: the tournament ends when the final is decided, and its
+    winner_account_id is set.
+
+  Schema (003_tournaments.sql)
+
+  - tournaments: id, name, created_by → accounts, status
+    (registering|active|finished), max_players (2–8), winner_account_id,
+    timestamps
+  - tournament_entries: (tournament_id, account_id) primary key, seed (null
+    until Start), joined_at
+  - tournament_matches: primary key (tournament_id, round, slot),
+    black_account_id, white_account_id, current_game_id → games,
+    winner_account_id, status (pending|playing|decided)
+  - games: add a nullable tournament_id so a match's replays stay linked as
+    history. Make black_token_hash nullable.
+
+  At Start, every match row for the bracket is created up front. Round-1 matches
+  get their players and games immediately, and later rounds fill in as winners
+  advance. The next match for a winner is simply (round + 1, floor(slot / 2)),
+  and even slots feed the Black seat. This makes the bracket easy to render: the
+  UI only reads match rows.
+
+  Getting players into games
+
+  Tournament games are created as waiting, with both *_account_id columns set
+  and no token hashes. POST /api/tournaments/:id/matches/:round/:slot/seat
+  (account required) checks that the caller is in that match, then issues or
+  rotates that player's seat token. The game becomes active once both seats are
+  claimed. After that, the socket, move and resign code is unchanged.
+
+  Two holes to close:
+  1. The existing joinGame only checks status = 'waiting' AND white_token_hash
+     IS NULL. Anyone holding the link could take the White seat in a tournament
+     game. It must also require tournament_id IS NULL.
+  2. seatFor()/sameHash must handle a null token hash (an unclaimed seat)
+     without throwing.
+
+  Advancing the bracket
+
+  A TournamentService subscribes to GameService.onState. When a game with a
+  tournament_id finishes:
+  - Draw: create a replay game with colors swapped and point current_game_id at
+    it.
+  - Win: mark the match decided and place the winner in the next match. If both
+    players for that match are now known, create its game. If this was the
+    final, finish the tournament.
+
+  All of this runs in one transaction with SELECT … FOR UPDATE on the tournament
+  row. Otherwise, two semifinals finishing at the same moment could both try to
+  create the final. Byes are resolved the same way at Start, so a bye into an
+  existing opponent still creates that game.
+
+  No-shows matter more in a knockout than in round-robin, because one stuck game
+  blocks the whole bracket. Add POST …/matches/:round/:slot/forfeit {
+  loserAccountId } for the creator. It ends the game as a resign and advances
+  the other player. Clocks and automatic forfeits stay on the roadmap.
+
+  API
+
+  All write endpoints require an account; reads are public.
+
+  ┌──────────────────────────────────┬──────────────────────────────────────┐
+  │             Endpoint             │                 Rule                 │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ POST /tournaments                │ The creator is auto-entered. Say if  │
+  │                                  │ you'd prefer organizer-only.         │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ GET /tournaments?status= / GET   │ The detail includes entries plus the │
+  │ /tournaments/:id                 │  full match grid.                    │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ POST / DELETE                    │ Join or leave, only while            │
+  │ /tournaments/:id/entry           │ registering                          │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ POST /tournaments/:id/start      │ Creator only, at least 2 entrants    │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ …/seat, …/forfeit                │ As described above                   │
+  └──────────────────────────────────┴──────────────────────────────────────┘
+
+  New error codes: TOURNAMENT_NOT_FOUND (404), TOURNAMENT_FULL /
+  TOURNAMENT_NOT_OPEN / ALREADY_ENTERED (409), FORBIDDEN (403). Add a
+  docs/contract-deviations.md entry for the new types.
+
+  Frontend
+
+  - A Tournaments link in the topbar, next to the new AccountMenu.
+  - /tournaments lists tournaments that are Open, Live or Finished. The Create
+    form is shown only when useAuth() has an account; otherwise it shows a
+    sign-in prompt.
+  - /tournaments/:id:
+    - While registering: the entrant list, Join/Leave, and Start for the
+      creator.
+    - Once started: a bracket view with one CSS-grid column per round
+      (Quarterfinal, Semifinal, Final). Each match card shows the players, the
+      result and draw replays. Buttons depend on the viewer: Play (claims the
+      seat, stores it with setSeatToken, goes to /game/:id), Watch, Review, and
+      Forfeit for the creator.
+    - A champion banner when the tournament is finished.
+  - Add the methods to GameClient, httpClient and mockClient. Fixtures for a
+    5-player bracket (with byes) let the bracket UI be built before the backend
+    exists.
+
+  Order of work (about 2.5–3 hours)
+
+  1. Shared types and mock fixtures, then the bracket UI against the mocks. This
+     can start now, because it only adds new files and touches types.ts
+     minimally.
+  2. Once accounts is committed: the migration, repo, TournamentService
+     (seeding, byes, advancement) and routes.
+  3. The seat-claim flow and the joinGame guard, then an end-to-end run with 3
+     accounts: one bye, one draw replay, one forfeit.
+
+  I'd still wait for the accounts session to commit before touching
+  GameService.ts, routes.ts, App.tsx or httpClient.ts. It currently has
+  uncommitted edits in all four.
+
+  Two more decisions for you:
+  - Draws: replay with colors swapped (my recommendation), or a simpler rule
+    such as "a draw goes to White"?
+  - Creator: always auto-entered as a player, or able to run a tournament
+    without playing in it?
+
+❯ Supabase account creation is now finished...
+  For the decision lets keep everything as simple as possible for now. So going
+  with "a draw goes to white" is completely fine.
+  A creator should be able to run a tournament without playing in it
+
+⏺ Accounts is done, so I'll start building. First I'll check the committed
+  state.
+
+⏺ Bash(git status --short && git log --oneline -5 && cat package.json && ls
+      backend/migrations && cat backend/src/db/migrate.ts backend/src/db/pool.ts
+      backend/src/serv…)
+  ⎿  (No output)
+
+⏺ Accounts is committed (07992c4) and the tree is clean. Next I'll read the
+  current versions of the files I'll be extending.
+
+⏺ Bash(cat backend/migrations/002_accounts.sql
+      backend/migrations/003_enable_rls.sql backend/src/db/accountsRepo.ts &&
+      git diff 7743d29 HEAD -- backend/src/db/gamesRep…)
+  ⎿  (No output)
+
+⏺ Bash(sed -n 90,400p backend/src/game/GameService.ts)
+  ⎿  (No output)
+
+⏺ I'll read the rest of the current routes, the frontend data layer, and the
+  auth pieces.
+
+⏺ Bash(sed -n 100,200p backend/src/http/routes.ts; grep -rn "TokenHash"
+      backend/src backend/scripts | grep -v "^backend/src/db/gamesRepo.ts" ; cat
+      frontend/src/data/Ga…)
+  ⎿  (No output)
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ I have the full picture. Mock mode is guest-only, which matters because
+  tournaments need accounts. Before writing code, I'll check how to run and test
+  the backend locally.
+
+⏺ Bash(cat backend/package.json; head -40 backend/scripts/smoke.ts; docker ps
+      --format '{{.Names}} {{.Status}}' 2>&1 | head; grep -v -i
+      "key\|secret\|password" .env |…)
+  ⎿  (No output)
+⏺ No Docker here, and DATABASE_URL points at the hosted database. I won't run
+  the new migration against it without asking. I'll verify with typechecks plus
+  unit tests on the bracket logic instead.
+
+⏺ Bash(cat shared/package.json shared/src/index.ts; head -15
+      shared/src/engine/rules.test.ts; sed -n 1,80p
+      frontend/src/data/mockClient.ts; sed -n 230,260p frontend/sr…)
+  ⎿  (No output)
+
+⏺ I'll place the pure bracket math in shared since tests use vitest there and
+  the UI can reuse it. Next I'll check remaining touchpoints: endReason usage,
+  styles, and the deviations doc format.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ The patterns are all clear, so I'm starting on the code. First, the shared
+  contract: new types plus a forfeit end reason.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(python3 - <<'EOF'
+      p='shared/src/types.ts'…)
+  ⎿  Updated shared/src/types.ts (+76 -1)
+      35  
+      36  export type GameStatus = 'waiting' | 'active' | 'finished';
+      37  export type Winner = Player | 'draw';
+      38 -export type EndReason = 'normal' | 'resign';                   
+      38 +/** 'forfeit': a tournament organizer ended the game against a 
+         +player who didn't show. */                                     
+      39 +export type EndReason = 'normal' | 'resign' | 'forfeit';       
+      40  export type AnalysisStatus = 'none' | 'pending' | 'running' | '
+          done' | 'failed';
+      41  
+      42  export interface PlayerInfo {
+     ...
+      154    | 'BAD_TOKEN'
+      155    | 'UNAUTHORIZED'     // missing/invalid/expired access token
+            on an account endpoint
+      156    | 'USERNAME_TAKEN'
+      157 +  | 'FORBIDDEN'            // signed in, but not allowed (e.g.
+          + not the tournament's organizer)                              
+      158 +  | 'TOURNAMENT_NOT_FOUND'                                    
+      159 +  | 'TOURNAMENT_FULL'                                         
+      160 +  | 'TOURNAMENT_NOT_OPEN'  // the action doesn't fit the tourn
+          +ament's current status                                        
+      161    | 'INTERNAL';
+      162  
+      163  /** Body of every non-2xx REST response. */
+     ...
+      199  /** PUT /api/me: claim (or change) the username. */
+      200  export interface ClaimUsernameRequest { username: string }
+      201  
+      202 +// ---------- Tournaments ----------                          
+      203 +// Single elimination, 2..8 players, accounts only. Reads are 
+          +public; every write needs an                                  
+      204 +// account with a claimed username. Bracket math lives in brac
+          +ket.ts.                                                       
+      205 +                                                              
+      206 +export type TournamentStatus = 'registering' | 'active' | 'fin
+          +ished';                                                       
+      207 +                                                              
+      208 +export interface TournamentPlayer {                           
+      209 +  accountId: string;                                          
+      210 +  username: string;                                           
+      211 +}                                                             
+      212 +                                                              
+      213 +export interface TournamentSummary {                          
+      214 +  tournamentId: string;                                       
+      215 +  name: string;                 // trimmed, 1..40 chars       
+      216 +  status: TournamentStatus;                                   
+      217 +  /** Runs the tournament (starts it, forfeits no-shows). Not 
+          +a player unless they also entered. */                         
+      218 +  organizer: TournamentPlayer;                                
+      219 +  maxPlayers: number;           // 2..8                       
+     … 55 more lines (ctrl+o to expand)
+
+⏺ Next, the pure bracket math in shared, with tests.
+
+⏺ Write(shared/src/bracket.ts)
+  ⎿  Wrote 48 lines to shared/src/bracket.ts
+       1 // Single-elimination bracket math, shared by the server (seedin
+         g, advancement) and the UI (labels).
+       2 import type { Player, Winner } from './types';
+       3
+       4 export const MIN_TOURNAMENT_PLAYERS = 2;
+       6
+       7 /** Smallest power of two that fits `entrants` (at least 2). */
+       8 export function bracketSize(entrants: number): number {
+       9   let size = 2;
+      10   while (size < entrants) size *= 2;
+     … +46 lines (ctrl+o to expand)
+
+⏺ Write(shared/src/bracket.test.ts)
+  ⎿  Wrote 50 lines to shared/src/bracket.test.ts
+      1 import { describe, expect, it } from 'vitest';
+      2 import { bracketSize, matchWinner, nextMatch, roundCount, roundNa
+        me, seedOrder } from './bracket';
+      3
+      4 describe('bracketSize', () => {
+      6     expect([2, 3, 4, 5, 6, 7, 8].map(bracketSize)).toEqual([2, 4,
+         4, 8, 8, 8, 8]);
+      7     expect(roundCount(8)).toBe(3);
+      8   });
+      9 });
+     … +48 lines (ctrl+o to expand)
+
+⏺ Bash(echo "export * from './bracket';" >> shared/src/index.ts && npx vitest
+      run --root shared src/bracket.test.ts 2>&1 | tail -8)
+  ⎿  Updated shared/src/index.ts (+1 -0)
+      5  export * from './engine/search';
+      6  export * from './engine/analyze';
+      7  export * from './engine/motifs';
+      8 +export * from './bracket';                                      
+
+⏺ Bracket tests pass. Now the migration.
+
+⏺ Write(backend/migrations/004_tournaments.sql)
+  ⎿  Wrote 48 lines to backend/migrations/004_tournaments.sql
+       1 -- Single-elimination tournaments (2..8 players, accounts only).
+       3   id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(
+         ),
+         TWEEN 1 AND 40),
+         -- runs it; plays only if also entered
+       6   status        text        NOT NULL DEFAULT 'registering'
+         ive','finished')),
+       8   max_players   smallint    NOT NULL CHECK (max_players BETWEEN
+       9   rounds        smallint    NOT NULL DEFAULT 0,
+      10   winner_id     u
+     … +52 lines (ctrl+o to expand)
+
+⏺ Now the games repo: nullable black hash, a seat-token setter, and a
+  transactional insert for bracket games.
+
+⏺ Bash(python3 - <<'EOF'
+      p='backend/src/db/gamesRepo.ts'…)
+  ⎿  Updated backend/src/db/gamesRepo.ts (+22 -2)
+      25    whiteName: string | null;
+      26    blackAccountId: string | null;
+      27    whiteAccountId: string | null;
+      28 -  blackTokenHash: string;                                      
+      28 +  /** null only for a tournament seat its player hasn't claimed
+         + yet (see setSeatTokenHash). */                                
+      29 +  blackTokenHash: string | null;                               
+      30    whiteTokenHash: string | null;
+      31    board: Board;
+      32    turn: Player | null;
+     ...
+      63    white_name: string | null;
+      64    black_account_id: string | null;
+      65    white_account_id: string | null;
+      65 -  black_token_hash: string;                                    
+      66 +  black_token_hash: string | null;                             
+      67    white_token_hash: string | null;
+      68    board: string;
+      69    turn: Player | null;
+     ...
+      146    return rows[0] ? toRecord(rows[0], []) : null;
+      147  }
+      148  
+      149 +/**                                                           
+      150 + * A tournament game, inside the caller's transaction: both se
+          +ats belong to accounts and the game                           
+      151 + * starts active, but neither seat has a token until its playe
+          +r claims it.                                                  
+      152 + */                                                           
+      153 +export async function insertTournamentGame(client: pg.PoolClie
+          +nt, black: SeatHolder, white: SeatHolder): Promise<string> {  
+      154 +  const { rows } = await client.query<{ id: string }>(        
+      155 +    `INSERT INTO games (status, black_name, black_account_id, 
+          +white_name, white_account_id, board, turn, started_at)        
+      156 +     VALUES ('active', $1, $2, $3, $4, $5, 'B', now()) RETURNI
+          +NG id`,                                                       
+      157 +    [black.name, black.accountId, white.name, white.accountId,
+          + boardToString(initialBoard())],                              
+      158 +  );                                                          
+      159 +  return rows[0].id;                                          
+      160 +}                                                             
+      161 +                                                              
+      162 +/** Sets (or rotates) one seat's token hash. */               
+      163 +export async function setSeatTokenHash(id: string, seat: Playe
+          +r, tokenHash: string): Promise<void> {                        
+      164 +  const column = seat === 'B' ? 'black_token_hash' : 'white_to
+          +ken_hash';                                                    
+      165 +  await pool.query(`UPDATE games SET ${column} = $2 WHERE id =
+          + $1`, [id, tokenHash]);                                       
+      166 +}                                                             
+      167 +                                                              
+      168  export async function loadGame(id: string): Promise<GameRecord
+            | null> {
+     … 2 more lines (ctrl+o to expand)
+
+⏺ Next, GameService: a null-safe seatFor, plus claimSeat and forfeit.
+
+⏺ Bash(python3 - <<'EOF'
+      p='backend/src/game/GameService.ts'…)
+  ⎿  Updated backend/src/game/GameService.ts (+42 -1)
+      150    private seatFor(g: GameRecord, token: unknown): Player | nul
+           l {
+      151      if (typeof token !== 'string' || token.length === 0) retur
+           n null;
+      152      const h = hashToken(token);
+      153 -    if (sameHash(h, g.blackTokenHash)) return 'B';            
+      153 +    if (g.blackTokenHash && sameHash(h, g.blackTokenHash)) ret
+          +urn 'B';                                                      
+      154      if (g.whiteTokenHash && sameHash(h, g.whiteTokenHash)) ret
+           urn 'W';
+      155      return null;
+      156    }
+     ...
+      271      });
+      272    }
+      273  
+      274 +  /**                                                         
+      275 +   * Issues a fresh seat token to the account that owns a seat
+          + (tournament games are created with                           
+      276 +   * accounts assigned but no tokens). Rotates any earlier tok
+          +en, so the newest device wins the seat.                       
+      277 +   */                                                         
+      278 +  async claimSeat(gameId: string, accountId: string): Promise<
+          +{ gameId: string; color: Player; playerToken: string }> {     
+      279 +    return this.withLock(gameId, async () => {                
+      280 +      const g = await this.mustLoad(gameId);                  
+      281 +      const color: Player | null =                            
+      282 +        g.blackAccountId === accountId ? 'B' : g.whiteAccountI
+          +d === accountId ? 'W' : null;                                 
+      283 +      if (!color) throw new GameError('BAD_TOKEN', 'Your accou
+          +nt does not hold a seat in this game');                       
+      284 +      if (g.status !== 'active') throw new GameError('GAME_NOT
+          +_ACTIVE', 'Game is not active');                              
+      285 +      const playerToken = newToken();                         
+      286 +      const hash = hashToken(playerToken);                    
+      287 +      await repo.setSeatTokenHash(gameId, color, hash);       
+      288 +      if (color === 'B') g.blackTokenHash = hash;             
+      289 +      else g.whiteTokenHash = hash;                           
+      290 +      return { gameId, color, playerToken };                  
+      291 +    });                                                       
+      292 +  }                                                           
+      293 +                                                              
+      294 +  /** Ends an active game against `loser` without their token 
+          +(a tournament organizer's no-show call). */                   
+      295 +  async forfeit(gameId: string, loser: Player): Promise<GameSt
+          +ate> {                                                        
+      296 +    return this.withLock(gameId, async () => {                
+      297 +      const g = await this.mustLoad(gameId);                  
+      298 +      if (g.status !== 'active') throw new GameError('GAME_NOT
+          +_ACTIVE', 'Game is not active');                              
+      299 +      const snapshot: GameSnapshotUpdate = {                  
+      300 +        ...snapshotOf(g),                                     
+      301 +        status: 'finished',                                   
+      302 +        turn: null,                                           
+     … 15 more lines (ctrl+o to expand)
+
+⏺ AnalysisRunner already queues any game that finishes, so forfeited games get
+  reviewed too. Now the tournaments repo, which holds the SQL only. The
+  transactions live in the service.
+
+⏺ Write(backend/src/db/tournamentsRepo.ts)
+  ⎿  Wrote 235 lines to backend/src/db/tournamentsRepo.ts
+       1 import type pg from 'pg';
+       2 import type {
+       3   Player,
+       4   TournamentDetail,
+       5   TournamentEntrant,
+       6   TournamentMatch,
+       7   TournamentStatus,
+       8   TournamentSummary,
+       9   Winner,
+      10 } from '@othello/shared';
+     … +280 lines (ctrl+o to expand)
+
+⏺ Now the TournamentService, which handles lifecycle, seeding and advancement.
+
+⏺ Write(backend/src/tournament/TournamentService.ts)
+  ⎿  Wrote 182 lines to backend/src/tournament/TournamentService.ts
+       1 import { randomInt } from 'node:crypto';
+       2 import type pg from 'pg';
+       3 import {
+       4   bracketSize,
+       5   matchWinner,
+       6   MAX_TOURNAMENT_PLAYERS,
+       7   MIN_TOURNAMENT_PLAYERS,
+       8   nextMatch,
+       9   roundCount,
+      10   seedOrder,
+     … +223 lines (ctrl+o to expand)
+
+⏺ I left a garbled first draft inside recordResult. Fixing it now: matchForGame
+  already accepts the pool.
+
+⏺ Update(backend/src/tournament/TournamentService.ts)
+  ⎿  Added 1 line, removed 4 lines
+      141  
+      142    /** Feeds a finished game's result into its bracket. A no-op
+            for casual games and repeats. */
+      143    async recordResult(gameId: string, winner: Winner): Promise<
+           void> {
+      144 -    const found = await repo.matchForGame({ query: (...a: Para
+          -meters<pg.Pool['query']>) => withTx((c) => c.query(...a)) } as
+          - never, gameId)                                               
+      145 -      .catch(() => null);                                     
+      146 -    void found;                                               
+      147 -    const match = await repo.matchForGameUnlocked(gameId);    
+      144 +    const match = await repo.matchForGame(pool, gameId);      
+      145      if (!match || match.winner_id) return;
+      146      await this.locked(match.tournament_id, async (c, t) => {
+      147        const m = await repo.matchForGame(c, gameId);
+
+⏺ Update(backend/src/tournament/TournamentService.ts)
+  ⎿  Added 1 line, removed 1 line
+      15    type TournamentSummary,
+      16    type Winner,
+      17  } from '@othello/shared';
+      18 -import { withTx } from '../db/pool';                           
+      18 +import { pool, withTx } from '../db/pool';                     
+      19  import { insertTournamentGame, isValidGameId } from '../db/game
+          sRepo';
+      20  import * as repo from '../db/tournamentsRepo';
+      21  import type { LockedTournament } from '../db/tournamentsRepo';
+
+⏺ Now routes and server wiring.
+
+⏺ Bash(python3 - <<'EOF'
+      p='backend/src/http/routes.ts'…)
+  ⎿  Updated backend/src/http/routes.ts (+100 -1)
+       6    GameState,
+       7    GameStatus,
+       8    ListGamesResponse,
+       9 +  ForfeitRequest,                                              
+      10 +  ListTournamentsResponse,                                     
+      11    MeResponse,
+      12    SeatResponse,
+      13 +  TournamentDetail,                                            
+      14 +  TournamentStatus,                                            
+      15  } from '@othello/shared';
+      16 +import { MAX_TOURNAMENT_PLAYERS, MIN_TOURNAMENT_PLAYERS, type A
+         +ccount } from '@othello/shared';                               
+      17  import { listGames, pingDb, type SeatHolder } from '../db/games
+          Repo';
+      18  import { getAccount, upsertAccount } from '../db/accountsRepo';
+      19  import { authEnabled, verifyAccessToken, type AuthUser } from '
+          ../auth/verifyToken';
+      20  import type { AnalysisRunner } from '../analysis/AnalysisRunner
+          ';
+      21  import { GameError, toGameSummary, type GameService } from '../
+          game/GameService';
+      22 +import type { TournamentService } from '../tournament/Tournamen
+         +tService';                                                     
+      23  
+      24  const STATUS_FOR: Record<ErrorCode, number> = {
+      25    BAD_REQUEST: 400,
+     ...
+      31    BAD_TOKEN: 403,
+      32    UNAUTHORIZED: 401,
+      33    USERNAME_TAKEN: 409,
+      34 +  FORBIDDEN: 403,                                              
+      35 +  TOURNAMENT_NOT_FOUND: 404,                                   
+      36 +  TOURNAMENT_FULL: 409,                                        
+      37 +  TOURNAMENT_NOT_OPEN: 409,                                    
+      38    INTERNAL: 500,
+      39  };
+      40  
+      41  const GAME_STATUSES: readonly GameStatus[] = ['waiting', 'activ
+          e', 'finished'];
+      42 +const TOURNAMENT_STATUSES: readonly TournamentStatus[] = ['regi
+         +stering', 'active', 'finished'];                               
+      43  
+      44  function sendError(res: Response, code: ErrorCode, message: str
+          ing): void {
+      45    const body: ApiError = { error: { code, message } };
+     ...
+      107    return { name: parseName(req.body), accountId: null };
+      108  }
+      109  
+      110 +/** Signed in with a claimed username: required for everything
+          + tournament-side. */                                          
+      111 +async function requireAccount(req: Request): Promise<Account> 
+          +{                                                             
+     … 106 more lines (ctrl+o to expand)
+  ⎿  Updated backend/src/server.ts (+5 -1)
+       8  import { GameService } from './game/GameService';
+       9  import { apiRouter } from './http/routes';
+      10  import { AnalysisRunner } from './analysis/AnalysisRunner';
+      11 +import { TournamentService } from './tournament/TournamentServi
+         +ce';                                                           
+      12  import { registerSocketHandlers, roomFor } from './socket/handl
+          ers';
+      13  
+      14  /**
+     ...
+      42      cors: WEB_ORIGINS.length ? { origin: WEB_ORIGINS } : undefi
+          ned,
+      43    });
+      44    registerSocketHandlers(io, games);
+      45 +  const tournaments = new TournamentService(games);            
+      46  
+      47    const analysis = new AnalysisRunner(games, {
+      48      progress: (p) => io.to(roomFor(p.gameId)).emit('analysis:pr
+          ogress', p),
+     ...
+      50    });
+      51  
+      52    app.disable('x-powered-by');
+      51 -  app.use('/api', allowWebOrigins, apiRouter(games, analysis));
+      53 +  app.use('/api', allowWebOrigins, apiRouter(games, analysis, t
+         +ournaments));                                                  
+      54  
+      55    httpServer.listen(PORT, () => console.log(`[api] listening on
+           http://localhost:${PORT}`));
+      56  
+      57    const requeued = await analysis.requeueOnBoot();
+      58    if (requeued > 0) console.log(`[analysis] re-queued ${requeue
+          d} game(s) from a previous run`);
+      59 +  const reconciled = await tournaments.reconcileOnBoot();      
+      60 +  if (reconciled > 0) console.log(`[tournament] recorded ${reco
+         +nciled} result(s) from a previous run`);                       
+      61  
+      62    const shutdown = () => {
+      63      analysis.stop();
+
+⏺ Backend and shared typecheck clean. I'll drop one unused import, then move to
+  the frontend, starting with the client interface and formatting.
+⏺ Bash(python3 - <<'EOF'
+      def edit(p, pairs):…)
+  ⎿  Updated backend/src/tournament/TournamentService.ts (+0 -1)
+      3  import {
+      4    bracketSize,
+      5    matchWinner,
+      6 -  MAX_TOURNAMENT_PLAYERS,                                       
+      6    MIN_TOURNAMENT_PLAYERS,
+      7    nextMatch,
+      8    roundCount,
+  ⎿  Updated frontend/src/data/GameClient.ts (+20 -0)
+      16    Player,
+      17    SeatResponse,
+      18    Square,
+      19 +  TournamentDetail,                                            
+      20 +  TournamentStatus,                                            
+      21 +  TournamentSummary,                                           
+      22  } from '@othello/shared';
+      23  
+      24  /** Every failure from a GameClient is one of these, whether it
+           came from REST (ApiError) or a socket ack. */
+     ...
+       82    claimUsername(username: string): Promise<Account>;
+       83    /** GET /api/me/games: the signed-in account's finished game
+           s, newest first. */
+       84    listMyGames(limit?: number): Promise<GameSummary[]>;
+       85 +                                                              
+       86 +  // ---- Tournaments (reads work for guests; writes need a si
+          +gned-in account) ----                                         
+       87 +                                                              
+       88 +  /** GET /api/tournaments?status=&limit=, newest first. */   
+       89 +  listTournaments(status?: TournamentStatus, limit?: number): 
+          +Promise<TournamentSummary[]>;                                 
+       90 +  /** GET /api/tournaments/:id */                             
+       91 +  getTournament(id: string): Promise<TournamentDetail>;       
+       92 +  /** POST /api/tournaments. The creator organizes; they play 
+          +only if they also join. */                                    
+       93 +  createTournament(name: string, maxPlayers: number): Promise<
+          +TournamentDetail>;                                            
+       94 +  joinTournament(id: string): Promise<TournamentDetail>;      
+       95 +  leaveTournament(id: string): Promise<TournamentDetail>;     
+       96 +  /** Organizer only. */                                      
+       97 +  startTournament(id: string): Promise<TournamentDetail>;     
+       98 +  /** Organizer only: the `loser` seat forfeits the match's ga
+          +me. */                                                        
+       99 +  forfeitMatch(id: string, round: number, slot: number, loser:
+          + Player): Promise<TournamentDetail>;                          
+      100 +  /** POST /api/games/:id/seat: a seat token for the signed-in
+          + account's seat (tournament games). */                        
+      101 +  claimSeat(gameId: string): Promise<SeatResponse>;           
+      102  }
+  ⎿  Updated frontend/src/data/httpClient.ts (+13 -0)
+      14    ErrorCode,
+      15    GameState,
+      16    ListGamesResponse,
+      17 +  ListTournamentsResponse,                                     
+      18    MeResponse,
+      19    SeatResponse,
+      20    ServerToClientEvents,
+      21    SubscribeResult,
+      22 +  TournamentDetail,                                            
+      23  } from '@othello/shared';
+      24  import { GameClientError, type GameClient, type GameEventHandle
+          rs, type GameSubscription } from './GameClient';
+      25  
+     ...
+      145      claimUsername: async (username) => (await call<MeResponse>
+           ('PUT', '/me', { username })).account!,
+      146      listMyGames: async (limit = 20) => (await call<ListGamesRe
+           sponse>('GET', `/me/games?limit=${limit}`)).games,
+      147  
+      148 +    listTournaments: async (status, limit = 30) =>            
+      149 +      (await call<ListTournamentsResponse>('GET', `/tournament
+          +s?limit=${limit}${status ? `&status=${status}` : ''}`)).tourna
+          +ments,                                                        
+      150 +    getTournament: (id) => call<TournamentDetail>('GET', `/tou
+          +rnaments/${encodeURIComponent(id)}`),                         
+      151 +    createTournament: (name, maxPlayers) => call<TournamentDet
+          +ail>('POST', '/tournaments', { name, maxPlayers }),           
+      152 +    joinTournament: (id) => call<TournamentDetail>('POST', `/t
+          +ournaments/${encodeURIComponent(id)}/join`),                  
+      153 +    leaveTournament: (id) => call<TournamentDetail>('POST', `/
+          +tournaments/${encodeURIComponent(id)}/leave`),                
+      154 +    startTournament: (id) => call<TournamentDetail>('POST', `/
+          +tournaments/${encodeURIComponent(id)}/start`),                
+      155 +    forfeitMatch: (id, round, slot, loser) =>                 
+      156 +      call<TournamentDetail>('POST', `/tournaments/${encodeURI
+          +Component(id)}/matches/${round}/${slot}/forfeit`, { loser }), 
+      157 +    claimSeat: (gameId) => call<SeatResponse>('POST', `/games/
+          +${encodeURIComponent(gameId)}/seat`),                         
+      158 +                                                              
+      159      async subscribe(gameId, playerToken, handlers): Promise<Ga
+           meSubscription> {
+      160        const s = getSocket();
+      161        const entry: Entry = { gameId, playerToken, handlers, li
+           ve: false };
+  ⎿  Updated frontend/src/data/mockClient.ts (+25 -0)
+      243      async listMyGames() {
+      244        return [];
+      245      },
+      246 +    // Tournaments need accounts, so mock mode shows an empty 
+          +list and refuses writes.                                      
+      247 +    async listTournaments() {                                 
+      248 +      return [];                                              
+      249 +    },                                                        
+      250 +    async getTournament() {                                   
+      251 +      throw new GameClientError('TOURNAMENT_NOT_FOUND', 'Tourn
+          +aments are not available in mock mode');                      
+      252 +    },                                                        
+      253 +    async createTournament() {                                
+      254 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      255 +    },                                                        
+      256 +    async joinTournament() {                                  
+      257 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      258 +    },                                                        
+      259 +    async leaveTournament() {                                 
+      260 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      261 +    },                                                        
+      262 +    async startTournament() {                                 
+      263 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      264 +    },                                                        
+      265 +    async forfeitMatch() {                                    
+      266 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      267 +    },                                                        
+      268 +    async claimSeat() {                                       
+      269 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      270 +    },                                                        
+      271    };
+      272  
+      273    return client;
+  ⎿  Updated frontend/src/format.ts (+10 -1)
+      18    BAD_TOKEN: "You don't hold a seat in this game.",
+      19    UNAUTHORIZED: 'Your session has expired. Sign in again.',
+      20    USERNAME_TAKEN: 'That username is taken.',
+      21 +  FORBIDDEN: "You're not allowed to do that.",                 
+      22 +  TOURNAMENT_NOT_FOUND: 'Tournament not found.',               
+      23 +  TOURNAMENT_FULL: 'This tournament is full.',                 
+      24 +  TOURNAMENT_NOT_OPEN: "That can't be done at this stage of the
+         + tournament.",                                                 
+      25    INTERNAL: 'Something went wrong on the server. Try again.',
+      26  };
+      27  
+     ...
+      35    if (game.status !== 'finished' || !game.winner) return '';
+      36    if (game.winner === 'draw') return `Draw, ${game.counts.B}–${
+          game.counts.W}`;
+      37    const loser = game.winner === 'B' ? 'W' : 'B';
+      34 -  const how = game.endReason === 'resign' ? 'by resignation' : 
+         -`${game.counts[game.winner]}–${game.counts[loser]}`;           
+      38 +  const how =                                                  
+      39 +    game.endReason === 'resign'                                
+      40 +      ? 'by resignation'                                       
+      41 +      : game.endReason === 'forfeit'                           
+      42 +        ? 'by forfeit'                                         
+      43 +        : `${game.counts[game.winner]}–${game.counts[loser]}`; 
+      44    return `${playerLabel(game, game.winner)} wins ${how}`;
+      45  }
+      46  
+
+⏺ That on-disk change to TournamentService.ts was my own import cleanup. Before
+  writing the pages, I'll look at how the home page renders lists so the new
+  ones match.
+
+⏺ Bash(sed -n 60,200p frontend/src/pages/HomePage.tsx; sed -n 78,122p
+      frontend/src/styles.css; grep -n "stack-form\|account-chip\|\.modal"
+      frontend/src/styles.css)
+  ⎿  (No output)
+
+⏺ I'll check the seat-storage helpers, then write the pages. I'm also fixing the
+  home page's shortResult, which would otherwise show a forfeit as a disc
+  score.
+
+⏺ Bash(grep -n "export" frontend/src/data/seatStorage.ts && python3 - <<'EOF'
+      p='frontend/src/pages/HomePage.tsx'…)
+  ⎿  Updated frontend/src/pages/HomePage.tsx (+1 -0)
+      121    if (g.winner === 'draw') return `Draw ${g.counts.B}–${g.coun
+           ts.W}`;
+      122    const name = g.players[g.winner]?.name ?? (g.winner === 'B' 
+           ? 'Black' : 'White');
+      123    if (g.endReason === 'resign') return `${name} won by resigna
+           tion`;
+      124 +  if (g.endReason === 'forfeit') return `${name} won by forfei
+          +t`;                                                           
+      125    const loser = g.winner === 'B' ? 'W' : 'B';
+      126    return `${name} won ${g.counts[g.winner]}–${g.counts[loser]}
+           `;
+      127  }
+
+⏺ Write(frontend/src/pages/TournamentsPage.tsx)
+  ⎿  Wrote 150 lines to frontend/src/pages/TournamentsPage.tsx
+       1 import { useEffect, useState, type FormEvent } from 'react';
+       2 import { Link, useNavigate } from 'react-router-dom';
+       3 import { MAX_TOURNAMENT_PLAYERS, MIN_TOURNAMENT_PLAYERS, type To
+         urnamentSummary } from '@othello/shared';
+       4 import { useAuth } from '../auth/AuthContext';
+       6 import { useToasts } from '../components/Toasts';
+       7 import { SignInDialog } from '../components/AccountMenu';
+       8 import { errorText, fmtDate } from '../format';
+       9
+      10 const PLAYER_OPTIONS = Array.from(
+     … +162 lines (ctrl+o to expand)
+
+⏺ Now the tournament detail page and the bracket component.
+
+⏺ Write(frontend/src/components/Bracket.tsx)
+  ⎿  Wrote 118 lines to frontend/src/components/Bracket.tsx
+       1 import { Link } from 'react-router-dom';
+       2 import { roundName, type Player, type TournamentDetail, type Tou
+         rnamentMatch, type TournamentPlayer } from '@othello/shared';
+       3
+       4 interface Props {
+       6   /** The viewer's account id, or null for guests. */
+       7   viewerId: string | null;
+       8   isOrganizer: boolean;
+       9   busy: boolean;
+      10   onPlay(m: TournamentMatch): void;
+     … +132 lines (ctrl+o to expand)
+
+⏺ Write(frontend/src/pages/TournamentPage.tsx)
+  ⎿  Wrote 191 lines to frontend/src/pages/TournamentPage.tsx
+       1 import { useCallback, useEffect, useState } from 'react';
+       2 import { Link, useNavigate, useParams } from 'react-router-dom';
+       3 import { MIN_TOURNAMENT_PLAYERS, type Player, type TournamentDet
+       4 import { useAuth } from '../auth/AuthContext';
+       5 import { useGameClient } from '../data/ClientContext';
+       6 import { getSeatToken, setSeatToken } from '../data/seatStorage'
+         ;
+       8 import { SignInDialog } from '../components/AccountMenu';
+       9 import { Bracket } from '../components/Bracket';
+      10 import { errorText, fmtDate } from '../format';
+     … +200 lines (ctrl+o to expand)
+
+⏺ Next: routes, a topbar Tournaments link (through the leave guard so it won't
+  abandon a live game silently), and styles.
+
+⏺ Bash(python3 - <<'EOF'
+      p='frontend/src/App.tsx'…)
+  ⎿  Updated frontend/src/App.tsx (+10 -1)
+       4  import { HomePage } from './pages/HomePage';
+       5  import { GamePage } from './pages/GamePage';
+       6  import { ReviewPage } from './pages/ReviewPage';
+       7 +import { TournamentsPage } from './pages/TournamentsPage';     
+       8 +import { TournamentPage } from './pages/TournamentPage';       
+       9  
+      10  export function App() {
+      11    const { pathname } = useLocation();
+     ...
+      41            </Link>
+      42            <span className="tagline">Play a friend, then see whe
+          re the game turned.</span>
+      43          </div>
+      42 -        <div className="topbar-side">                          
+      44 +        <div className="topbar-side topbar-right">             
+      45 +          {pathname !== '/tournaments' && (                    
+      46 +            <button type="button" className="btn" onClick={() =
+         +> leave(() => navigate('/tournaments'))}>                      
+      47 +              Tournaments                                      
+      48 +            </button>                                          
+      49 +          )}                                                   
+      50            <AccountMenu />
+      51          </div>
+      52        </header>
+     ...
+      55            <Route path="/" element={<HomePage />} />
+      56            <Route path="/game/:id" element={<GamePage />} />
+      57            <Route path="/game/:id/analysis" element={<ReviewPage
+           />} />
+      58 +          <Route path="/tournaments" element={<TournamentsPage 
+         +/>} />                                                         
+      59 +          <Route path="/tournaments/:id" element={<TournamentPa
+         +ge />} />                                                      
+      60            <Route
+      61              path="*"
+      62              element={
+
+⏺ Bash(sed -n 300,316p frontend/src/styles.css && cat >> frontend/src/styles.css
+      <<'EOF'…)
+  ⎿  Updated frontend/src/styles.css (+43 -0)
+      329  .stack-form { display: flex; flex-direction: column; gap: 12px
+           ; margin-top: 12px; }
+      330  .stack-form label { display: flex; flex-direction: column; gap
+           : 4px; font-size: 0.85rem; color: var(--ink-2); }
+      331  .recent-prompt { display: flex; flex-direction: column; align-
+           items: flex-start; gap: 4px; }
+      332 +                                                              
+      333 +/* ---------- Tournaments ---------- */                       
+      334 +.topbar-right { display: inline-flex; align-items: center; gap
+          +: 10px; }                                                     
+      335 +.btn-small { font-size: 0.8rem; padding: 4px 10px; }          
+      336 +select { font: inherit; padding: 8px 10px; border: 1px solid v
+          +ar(--line); border-radius: 8px; background: #fff; color: var(-
+          +-ink); }                                                      
+      337 +                                                              
+      338 +.tournaments { display: grid; gap: 24px; align-items: start; g
+          +rid-template-columns: minmax(280px, 400px) minmax(0, 640px); j
+          +ustify-content: center; }                                     
+      339 +.tournament-create h1 { margin-bottom: 0.4rem; }              
+      340 +.tournament-group + .tournament-group { margin-top: 16px; }   
+      341 +.tournament-group h3 { font-size: 0.8rem; text-transform: uppe
+          +rcase; letter-spacing: 0.05em; color: var(--muted); margin: 0 
+          +0 8px; }                                                      
+      342 +.status-pill.tournament-registering { background: #e2f1e8; col
+          +or: #1a6a40; }                                                
+      343 +.status-pill.tournament-active { background: #fff1d6; color: #
+          +7a5200; }                                                     
+      344 +                                                              
+      345 +.tournament { display: flex; flex-direction: column; gap: 16px
+          +; max-width: 1100px; margin: 0 auto; }                        
+      346 +.tournament-head { display: flex; justify-content: space-betwe
+          +en; align-items: flex-start; gap: 12px; }                     
+      347 +.tournament-head h1 { margin-bottom: 0.2rem; }                
+      348 +.champion { margin-bottom: 0; }                               
+      349 +.entrant-list { margin: 0 0 8px; padding-left: 1.4rem; display
+          +: grid; grid-template-columns: repeat(auto-fill, minmax(180px,
+          + 1fr)); gap: 6px 16px; }                                      
+      350 +.entrant-list li { display: flex; align-items: center; gap: 8p
+          +x; font-weight: 600; }                                        
+      351 +.tournament-actions { display: flex; gap: 10px; flex-wrap: wra
+          +p; align-items: center; margin-top: 12px; }                   
+      352 +                                                              
+      353 +.bracket { display: grid; gap: 20px; overflow-x: auto; padding
+          +-bottom: 4px; }                                               
+      354 +.bracket-round { display: flex; flex-direction: column; min-wi
+          +dth: 0; }                                                     
+      355 +.bracket-round h3 { font-size: 0.8rem; text-transform: upperca
+          +se; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 8
+          +px; text-align: center; }                                     
+      356 +.bracket-matches { display: grid; gap: 10px; flex: 1; }       
+      357 +.bracket-cell { display: flex; align-items: center; }         
+      358 +.bracket-match { width: 100%; border: 1px solid var(--line); b
+          +order-radius: 8px; padding: 6px 8px; background: #fbfaf6; disp
+          +lay: flex; flex-direction: column; gap: 2px; }                
+      359 +.bracket-match.mine { border-color: var(--accent); box-shadow:
+          + 0 0 0 1px var(--accent); }                                   
+      360 +.bracket-match.match-pending { opacity: 0.7; }                
+      361 +.bracket-player { display: flex; align-items: center; gap: 8px
+          +; padding: 2px 0; min-width: 0; }                             
+      362 +.bracket-player.won { font-weight: 700; }                     
+      363 +.bracket-player.lost .bracket-name { color: var(--muted); text
+          +-decoration: line-through; }                                  
+      364 +.bracket-name { flex: 1; min-width: 0; overflow: hidden; text-
+          +overflow: ellipsis; white-space: nowrap; }                    
+      365 +.tiny-seed { font-size: 0.75rem; }                            
+      366 +.bracket-actions { display: flex; gap: 6px; flex-wrap: wrap; a
+          +lign-items: flex-start; margin-top: 4px; }                    
+      367 +.bracket-actions:empty { display: none; }                     
+      368 +.forfeit summary { list-style: none; }                        
+     … 6 more lines (ctrl+o to expand)
+
+⏺ Everything typechecks. Next I'll check whether the game and review pages
+  special-case end reasons anywhere that would mislabel a forfeit.
+
+⏺ Bash(grep -rn "endReason\|resign" frontend/src --include=*.tsx | grep -v
+      "onResign\|btn-resign\|client.resign\|resign(" | head; npm test 2>&1 |
+      grep -E "Tests|passed…)
+  ⎿  (No output)
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ The UI labels forfeits correctly everywhere. The bracket logic still needs a
+  real database test. I'll check for a local Postgres I can run in the
+  scratchpad, which avoids touching your hosted DB.
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ No local Postgres found, so I'll spin up PGlite (Postgres-in-WASM) behind a
+  socket server in the scratchpad, letting me run real migrations and test
+  end-to-end without touching project dependencies or your hosted database.
+
+⏺ Bash(cd /private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cros
+      stie/538e2dfb-69ab-4aff-9263-f38fd5efa73d/scratchpad && mkdir -p pgl && cd
+      pgl && npm i…)
+  ⎿  (No output)
+
+⏺ The socket server already handles queuing and multiple connections, enough to
+  test row locking. Next I'll write an end-to-end script covering 5 players with
+  byes, a played game, a draw, a forfeit, and permission failures.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/538e2dfb-69ab-4aff-9263-f38fd5efa73d/scratchpad
+      cat > $S/pgl/server.mjs <<'EOF'…)
+  ⎿  (No output)
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/backend &&
+      DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres
+      DATABASE_CA_CERT= timeout 12…)
+  ⎿  (No output)
+
+⏺ Bash(DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres
+      DATABASE_CA_CERT= npx tsx
+      /private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-c…)
+  ⎿  (No output)
+
+⏺ Still verifying: my test script needs to be ESM to run, so I'm renaming it to
+  .mts and running it again.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/538e2dfb-69ab-4aff-9263-f38fd5efa73d/scratchpad; mv
+      $S/tournament-e2e.ts $S/tournam…)
+  ⎿  (No output)
+⏺ Migrations applied cleanly. The failure was my test data: usernames must be at
+  least 3 characters. Fixing the test and making names unique per run.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/538e2dfb-69ab-4aff-9263-f38fd5efa73d/scratchpad; sed -i '' "s/const
+      org = await mk(…)
+  ⎿  (No output)
+
+⏺ All tests pass — byes, a full game, the draw, the organizer forfeit, the
+  champion, and permission guards. Next I'll run the real API against the test
+  database and check the public and unauthenticated endpoints.
+
+⏺ Bash((DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres
+      DATABASE_CA_CERT= PORT=3099 npx tsx src/server.ts >
+      /private/tmp/claude-501/-Users-mitchelri…)
+  ⎿  (No output)
+  ⎿  (timeout 1m)
+
+⏺ The HTTP layer behaves correctly, and the analysis runner even picked up the
+  game from the test run. Last step is the contract-deviations entry, following
+  the doc's existing pattern.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie && cat >>
+      docs/contract-deviations.md <<'EOF'…)
+  ⎿  Updated docs/contract-deviations.md (+16 -0)
+      107  | D2 | DB TLS | — | `DATABASE_CA_CERT` (PEM or path) → verifie
+           d TLS. `sslmode` etc. are stripped from `DATABASE_URL` when it
+           's set. | pg treats `sslmode=require` as verify-full, and URL 
+           SSL params override the `ssl` option. Verifying against Supaba
+           se's CA beats `rejectUnauthorized: false`. |
+      108  | D3 | Same-origin assumption (§0b) | Relative URLs via the Vi
+           te proxy | Optional `VITE_API_URL` (REST + socket) and `WEB_OR
+           IGIN` (CORS allowlist for Express and Socket.IO). Both unset l
+           ocally, so dev and ngrok are unchanged. | The web app (static 
+           host) and the API (long-running Node host) live on different d
+           omains once deployed. |
+      109  | D4 | Runtime deps | `tsx` as a dev dependency | `tsx` moved 
+           to `dependencies` | The API runs through `tsx` in production, 
+           and hosts may skip dev dependencies. |
+      110 +                                                              
+      111 +## Session 2: tournaments (single elimination)                
+      112 +                                                              
+      113 +The contract put tournaments in Milestone 3 (§7.1) as round-ba
+          +sed Swiss. This build does a smaller version on top of account
+          +s: single elimination, 2–8 players, with the simplest rules th
+          +at still produce a champion.                                  
+      114 +                                                              
+      115 +| # | Area | What the contract says | What was built | Why |  
+      116 +|---|---|---|---|---|                                         
+      117 +| T1 | Format | Swiss (§7.1) | Single elimination. Bracket siz
+          +e = next power of two, random seeding at start, standard place
+          +ment (1v8, 4v5, 2v7, 3v6), so byes always go to top seeds. | A
+          + bracket needs no pairing engine or tie-breaks, and it's easy 
+          +to follow. Swiss stays on the roadmap. |                      
+      118 +| T2 | Rules | — | The upper slot plays Black. **A draw goes t
+          +o White.** A resign or a forfeit counts as a loss. | A knockou
+          +t match needs a winner. "Draw → White" avoids replays. |      
+      119 +| T3 | Who can take part | — | Accounts with a claimed usernam
+          +e create and join. The creator **organizes** (starts the tourn
+          +ament, forfeits no-shows) and plays only if they also join. Gu
+          +ests can view brackets and watch games. | Results belong to id
+          +entities. An organizer running an event they don't play in is 
+          +the normal case. |                                            
+      120 +| T4 | Schema | `tournaments`, `rounds`, `pairings` (§7.1) | `
+          +004_tournaments.sql`: `tournaments`, `tournament_entries`, and
+          + `tournament_matches` (primary key `(tournament_id, round, slo
+          +t)`, `game_id` → `games`). All matches are created on start, a
+          +nd later rounds fill in as winners advance. `games.black_token
+          +_hash` is now nullable, and `end_reason` gains `'forfeit'`. | 
+          +A round is just a column. Pre-created match rows make the brac
+          +ket a plain read. |                                           
+      121 +| T5 | Seat credential | Seat tokens from create/join | Tourna
+          +ment games are created **active**, with both seats assigned to
+          + accounts and no tokens. `POST /api/games/:id/seat` (account r
+          +equired) issues or rotates the caller's own seat token. After 
+          +that, socket play is unchanged. | Tokens are stored only as ha
+          +shes, so they can't be handed out later. Claiming keeps the so
+          +cket layer untouched. Because the game is already active, the 
+          +open-seat `join` can't hijack it. |                           
+      122 +| T6 | Advancement | — | `TournamentService` listens to `GameS
+          +ervice.onState`. When a tournament game finishes, it records t
+          +he winner and fills the next match (creating that game once bo
+          +th players are known) or finishes the tournament. Every write 
+          +holds the tournament's row lock in one transaction. On boot, i
+          +t re-feeds any finished results that were missed. | Two semifi
+          +nals ending at once can't both create the final. Recording is 
+          +idempotent, so repeated finished broadcasts are harmless. |   
+      123 +| T7 | No-shows | Abandonment rules (§7.1) | The organizer can
+          + forfeit a playing match: `POST /api/tournaments/:id/matches/:
+          +round/:slot/forfeit {loser}`. The game ends with `endReason: '
+          +forfeit'` and still gets analyzed. | In a knockout, a single s
+          +tuck game blocks the whole bracket. Clocks and automatic forfe
+          +its remain roadmap items. |                                   
+      124 +| T8 | `types.ts` | Frozen | Added `Tournament*` types, `Match
+          +Status`, `ForfeitRequest`, `EndReason 'forfeit'`, and `ErrorCo
+          +de` values `FORBIDDEN` (403), `TOURNAMENT_NOT_FOUND` (404), `T
+          +OURNAMENT_FULL` and `TOURNAMENT_NOT_OPEN` (409). Bracket math 
+          +lives in `shared/src/bracket.ts` (unit tested). | These are ad
+          +ditive changes, and the server and UI share the same bracket m
+          +ath. |                                                        
+      125 +| T9 | Live updates | — | The tournament page polls every 5 se
+          +conds while a tournament isn't finished. There's no tournament
+          + socket room. | A bracket changes once per game, so polling is
+          + enough for now. |                                            
+
+⏺ Tournaments are built and working locally, with your three decisions applied:
+  single elimination, a cap of 8 players, and an account required to create or
+  join. Draws go to White. The creator runs the tournament and only plays if
+  they also join. Nothing is committed, and the new migration
+  (004_tournaments.sql) has not been run on your hosted database.
+
+  How I checked it:
+  - Typechecks pass for backend, frontend and shared, and all 41 existing tests
+    pass, including 6 new ones for the bracket logic.
+  - I ran the full flow against a throwaway local Postgres in a temp directory,
+    not your hosted database. It covered 5 players (so 3 byes), one game played
+    to the end, a draw going to White, an organizer forfeit, the final, and a
+    champion. It also covered the refusals: a non-organizer can't start or
+    forfeit, nobody can join after start, and nobody outside a match can take a
+    seat in its game.
+  - I started the real API against that database and hit the endpoints: the
+    public list works, and writes without sign-in are refused.
+  - I haven't clicked through the new pages in a browser.
+
+  How it works:
+  - Players and games: when the organizer starts, seeds are drawn at random and
+    every match row is created up front. Byes advance automatically. Each game
+    starts with both players assigned but no seat token. Pressing Play on the
+    bracket gets that player a token (POST /api/games/:id/seat), and from there
+    the game runs through the existing move/resign code unchanged. Because these
+    games start already active, the normal invite-link join can't take a seat
+    in them.
+  - Advancing: when a tournament game finishes, the winner moves into the next
+    match, and that match's game is created once both players are known. Updates
+    to a tournament are done one at a time, so two semifinals finishing at the
+    same moment can't both create the final. If the server restarts, any results
+    it missed are applied on the next boot.
+  - No-shows: the organizer can forfeit a player who doesn't show. The game is
+    recorded as a forfeit (a new end reason, labelled "won by forfeit") and
+    still gets analyzed.
+  - UI: a Tournaments button in the top bar leads to a list (Open, In progress,
+    Finished) with a create form. Each tournament page shows the players while
+    registering, then a bracket with Play, Watch, Review and Forfeit. The page
+    refreshes itself every 5 seconds until the tournament finishes.
+  - Mock mode: ?mock=1 is guest-only, so it shows an empty tournament list.
+
+  Main new files:
+  - TournamentService.ts (backend/src/tournament/TournamentService.ts)
+  - tournamentsRepo.ts (backend/src/db/tournamentsRepo.ts)
+  - bracket.ts (shared/src/bracket.ts)
+  - TournamentPage.tsx (frontend/src/pages/TournamentPage.tsx)
+  - Bracket.tsx (frontend/src/components/Bracket.tsx)
+
+  The design decisions are written up in contract-deviations.md
+  (docs/contract-deviations.md) under "Session 2: tournaments".
+
+  Known limits:
+  - Claiming a seat on a second device replaces the token, so the first device
+    loses the seat.
+  - There's no clock yet; a stuck game waits until the organizer forfeits it.
+  - The organizer can't cancel or delete a tournament.
+
+  Some changes in the tree aren't mine: the renamed files in docs/ai-usage/ and
+  a new render.yaml. Presumably those are yours or the other session's, so I
+  left them alone.
+
+  Next steps:
+  1. Run the migration on your database (npm run migrate -w backend); the server
+     also runs it on boot.
+  2. Try it with two or three accounts in separate browsers.
+  3. Commit when you're happy with it.
+
+❯ We need a way to implement a tournament being able to be closed or ended by
+  the organisor. Dont implement, plan and report back the changes needed
+
+⏺ Both tournament pages changed since I wrote them, so I'll look at their
+  current state before planning the UI part.
+
+⏺ Bash(git status --short | head -30; git log --oneline -3; grep -n "status
+      ===\|status
+      !==\|tournament-actions\|startTournament\|result-banner\|finished"
+      frontend/src…)
+  ⎿  (No output)
+
+⏺ Plan: organizer can close or end a tournament
+
+  My recommendation: add one organizer-only End tournament action that works at
+  any stage before a champion is decided. It moves the tournament to a new
+  cancelled status. Every existing rule already assumes that "finished" means
+  there is a champion, so a separate status keeps that assumption true.
+
+  Behavior
+
+  ┌────────────────┬────────────────────────────────────────────────────────┐
+  │     Stage      │                    What "End" does                     │
+  ├────────────────┼────────────────────────────────────────────────────────┤
+  │                │ Closes the tournament. No games exist, so entrants     │
+  │ registering    │ just see "Cancelled by the organizer". The link keeps  │
+  │                │ working.                                               │
+  ├────────────────┼────────────────────────────────────────────────────────┤
+  │ active         │ Freezes the bracket as it stands. Decided matches keep │
+  │                │  their results, and pending matches never get games.   │
+  ├────────────────┼────────────────────────────────────────────────────────┤
+  │ finished /     │ Refused with TOURNAMENT_NOT_OPEN.                      │
+  │ cancelled      │                                                        │
+  └────────────────┴────────────────────────────────────────────────────────┘
+
+  Games in progress when it's ended: leave them running. Players can finish, and
+  the games are still saved and analyzed, but their results no longer feed the
+  bracket. The alternative is force-ending them, but every finished game
+  currently needs a winner, so that would mean a new "aborted" end reason with
+  no winner, which breaks the game contract. Leaving them running avoids that.
+
+  Backend
+
+  Migration 005_tournament_cancel.sql
+  - Replace the tournaments.status check with one that allows 'cancelled'.
+  - Reuse finished_at as the "ended at" time, so no new column is needed.
+
+  shared/src/types.ts
+  - TournamentStatus gets 'cancelled'.
+  - Update the doc comment: winner is non-null only when the status is finished,
+    never when it's cancelled.
+  - No new error codes; the existing FORBIDDEN and TOURNAMENT_NOT_OPEN cover it.
+
+  tournamentsRepo.ts (backend/src/db/tournamentsRepo.ts)
+  - Add markCancelled(c, id), which sets the status and finished_at.
+  - listUnrecordedResults() should join tournaments and only return rows where
+    the status is active. Otherwise every boot re-checks results that no longer
+    count.
+
+  TournamentService.ts (backend/src/tournament/TournamentService.ts)
+  - Add cancel(id, account). Under the existing row lock: check the caller is
+    the organizer (FORBIDDEN otherwise), then check the status is registering or
+    active (TOURNAMENT_NOT_OPEN otherwise), then call markCancelled.
+  - In recordResult, after taking the lock, return early if the status isn't
+    active. This one guard stops a late game result from advancing a frozen
+    bracket. Because it runs under the same lock as cancel, a result and a
+    cancel can't interleave.
+  - Existing gap: forfeit() checks the organizer and the match but never the
+    tournament status. Add an active check so a forfeit after ending is refused.
+
+  routes.ts (backend/src/http/routes.ts)
+  - Add POST /tournaments/:id/cancel (account required), returning
+    TournamentDetail.
+  - Add 'cancelled' to TOURNAMENT_STATUSES so ?status=cancelled filters work.
+
+  Frontend
+
+  Client layer: add cancelTournament(id) to the GameClient interface,
+  httpClient, and mockClient (where it throws UNAUTHORIZED, like the other
+  writes).
+
+  TournamentPage.tsx (frontend/src/pages/TournamentPage.tsx)
+  - An organizer-only End tournament button (danger style), shown in both
+    registering and active.
+  - The confirm text depends on the stage:
+    - Registering: "Close registration and cancel?"
+    - Active: "End now? No champion will be declared. Games in progress won't
+      count."
+  - A "Cancelled by @organizer · {date}" banner in place of the champion banner.
+  - Polling stops once the status is finished or cancelled.
+
+  Bracket.tsx (frontend/src/components/Bracket.tsx)
+  - When cancelled, the bracket is read-only: no Play button. Players already
+    seated can get back in through Watch, because the game page picks up their
+    stored seat token.
+  - Pending matches show "Not played".
+
+  TournamentsPage.tsx (frontend/src/pages/TournamentsPage.tsx): cancelled
+  tournaments go in the Finished group with a "Cancelled" pill, plus a
+  status-pill.tournament-cancelled style.
+
+  Docs and tests
+
+  - Add row T10 to contract-deviations.md (docs/contract-deviations.md).
+  - Extend the scratch end-to-end script:
+    - Cancel while registering, and check that joining afterwards is refused.
+    - Cancel mid-bracket, then finish an in-flight game, and check the bracket
+      doesn't change.
+    - Forfeit after cancel is refused (TOURNAMENT_NOT_OPEN).
+    - A non-organizer cancelling is refused (FORBIDDEN).
+    - Cancelling twice is refused (TOURNAMENT_NOT_OPEN).
+
+  Coordination
+
+  A frontend redesign is in progress right now, with uncommitted changes to
+  TournamentPage.tsx, TournamentsPage.tsx and styles.css. The backend, shared
+  types and migration can be done now without conflicts. I'd hold the three UI
+  edits until the redesign is committed. The whole change is about 45 minutes,
+  most of it UI and tests.
+
+  Decisions for you:
+  1. Games in progress: leave them running but not counting (my recommendation),
+     or force-end them?
+  2. Registering tournaments: show them as "Cancelled" (my recommendation, so
+     links keep working), or delete them entirely?
+
+❯ 1 - When a tournament is cancelled, you can just force-end them
+  2 - Yes we can show them as "cancelled", never hard delete
+
+⏺ Force-ending changes the plan in one place: a finished game currently always
+  has a winner. I'll check what depends on that before revising.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ I've updated the plan with your two answers. Everything else from the last
+  version stands. Force-ending is simpler than it sounds, because a finished
+  game with no winner is already handled almost everywhere: the tournament
+  listener skips it (s.status === 'finished' && s.winner), resultText returns an
+  empty string, and the game page falls back to "Game over". games.winner also
+  already allows NULL in the database.
+
+  Plan v2: organizer ends a tournament
+
+  Behavior
+
+  - Registering: the status becomes cancelled and the tournament shows as
+    "Cancelled". It is never deleted.
+  - Active: the status becomes cancelled, the bracket freezes as it stands, and
+    every game still in progress is force-ended. Those games have no winner and
+    a new end reason, 'cancelled'. Games with moves still get analyzed.
+  - Finished or already cancelled: refused with TOURNAMENT_NOT_OPEN.
+
+  Backend
+
+  Migration 005_tournament_cancel.sql
+  - tournaments.status check: add 'cancelled'.
+  - games.end_reason check: add 'cancelled'.
+
+  shared/src/types.ts
+  - TournamentStatus gets 'cancelled'.
+  - EndReason gets 'cancelled'.
+  - GameSummary.winner's comment changes from "non-null iff finished" to
+    "non-null iff finished, except when endReason === 'cancelled'". This is a
+    real contract change and gets its own deviations row.
+
+  GameService
+  - Add abort(gameId). It is modelled on forfeit() and runs under the per-game
+    lock. If the game isn't active, it does nothing (the game may have just
+    finished on its own). Otherwise it sets status: 'finished', winner: null,
+    endReason: 'cancelled' and turn: null, then broadcasts. The broadcast means
+    players mid-game see the game end immediately, and the analysis runner
+    queues it automatically.
+
+  TournamentService.cancel(id, account)
+  1. Under the tournament lock: check the caller is the organizer, check the
+     status is registering or active, collect the game_ids of matches still
+     being played, and call markCancelled. Commit.
+  2. After the commit, call games.abort() on each collected game. Cancelling
+     first means any game that finishes during the abort step is already ignored
+     by the bracket.
+
+  Guards on existing methods
+  - recordResult: after taking the lock, return early unless the status is
+    active.
+  - forfeit: require the status to be active. This fixes a gap in the current
+    code, which doesn't check.
+
+  Crash safety
+  - reconcileOnBoot also aborts any games still active in cancelled tournaments.
+    This covers a crash between steps 1 and 2.
+  - listUnrecordedResults filters to active tournaments.
+
+  Other backend changes
+  - Repo: add markCancelled(c, id), which sets the status and finished_at.
+  - Add a query for playing games in a cancelled tournament.
+  - Routes: add POST /tournaments/:id/cancel, and add 'cancelled' to
+    TOURNAMENT_STATUSES.
+
+  Frontend
+
+  Client layer: cancelTournament(id) in GameClient, httpClient and mockClient.
+
+  Tournament page
+  - An organizer-only End tournament button with a stage-specific confirm:
+    - Registering: "Cancel this tournament?"
+    - Active: "End now? N games in progress will be stopped and no champion
+      declared."
+  - A "Cancelled by @organizer · date" banner.
+  - Polling stops once the tournament is cancelled.
+
+  Bracket: when cancelled, it's read-only (Review and Watch only). Pending
+  matches show "Not played".
+
+  Tournaments list: cancelled tournaments go in the Finished group with a
+  "Cancelled" pill.
+
+  Showing cancelled games
+  - resultText: "Game ended: tournament cancelled".
+  - The same label in shortResult in RecentGames.tsx.
+  - The game page's end banner shows "Tournament cancelled" instead of "Game
+    over".
+
+  Docs and tests
+
+  - Add rows T10 (the cancel flow) and T11 (finished games with no winner) to
+    contract-deviations.md.
+  - Extend the end-to-end script:
+    - Cancel while registering, and check that joining afterwards is refused.
+    - Cancel mid-bracket with one game in progress, and check that the game is
+      finished with endReason 'cancelled' and no winner, and that the bracket is
+      unchanged.
+    - A forfeit after cancel is refused.
+    - A non-organizer cancelling gets FORBIDDEN.
+    - Cancelling twice gets TOURNAMENT_NOT_OPEN.
+    - Boot-time cleanup aborts a game that was left active.
+
+  Order and timing
+
+  The backend, shared types and migration don't conflict with anything and can
+  go first. The UI edits touch TournamentPage.tsx, TournamentsPage.tsx,
+  RecentGames.tsx, GamePage.tsx and styles.css, and all of those currently have
+  uncommitted changes from the frontend redesign. So the UI part should wait
+  until that work is committed. The total is about an hour.
+
+  Should I go ahead and build it, starting with the backend now and the UI once
+  the redesign is committed?
+
+❯ <ide_opened_file>The user opened the file
+  /Users/mitchelrifae/Desktop/Repos/othello-crosstie/README.md in the IDE. This
+  may or may not be related to the current task.</ide_opened_file>
+
+❯ Go ahead and implement
+
+⏺ Bash(git status --short && git log --oneline -4 && ls backend/migrations)
+  ⎿  (No output)
+
+⏺ The redesign is committed and the tree is clean, so I can do the backend and
+  UI together. Starting with the migration and shared types.
+
+⏺ Bash(cat > backend/migrations/005_tournament_cancel.sql <<'EOF'
+      -- The organizer can end a tournament before it has a champion. Games
+      still in progress are…)
+  ⎿  Created backend/migrations/005_tournament_cancel.sql (+9 -0)
+      1 +-- The organizer can end a tournament before it has a champion. 
+        +Games still in progress are                                     
+      2 +-- force-ended with no winner and end_reason 'cancelled'. Cancel
+        +led tournaments are never deleted.                              
+      3 +ALTER TABLE tournaments DROP CONSTRAINT IF EXISTS tournaments_st
+        +atus_check;                                                     
+      4 +ALTER TABLE tournaments ADD CONSTRAINT tournaments_status_check 
+      5 +  CHECK (status IN ('registering','active','finished','cancelled
+        +'));                                                            
+      6 +                                                                
+      7 +ALTER TABLE games DROP CONSTRAINT IF EXISTS games_end_reason_che
+        +ck;                                                             
+      8 +ALTER TABLE games ADD CONSTRAINT games_end_reason_check         
+      9 +  CHECK (end_reason IN ('normal','resign','forfeit','cancelled')
+        +);                                                              
+  ⎿  Updated shared/src/types.ts (+11 -6)
+      35  
+      36  export type GameStatus = 'waiting' | 'active' | 'finished';
+      37  export type Winner = Player | 'draw';
+      38 -/** 'forfeit': a tournament organizer ended the game against a 
+         -player who didn't show. */                                     
+      39 -export type EndReason = 'normal' | 'resign' | 'forfeit';       
+      38 +/**                                                            
+      39 + * 'forfeit': a tournament organizer ended the game against a p
+         +layer who didn't show.                                         
+      40 + * 'cancelled': its tournament was ended by the organizer; the 
+         +game has no winner.                                            
+      41 + */                                                            
+      42 +export type EndReason = 'normal' | 'resign' | 'forfeit' | 'canc
+         +elled';                                                        
+      43  export type AnalysisStatus = 'none' | 'pending' | 'running' | '
+          done' | 'failed';
+      44  
+      45  export interface PlayerInfo {
+     ...
+      55    status: GameStatus;
+      56    players: { B: PlayerInfo; W: PlayerInfo | null }; // W is nul
+          l while status === 'waiting'
+      57    counts: { B: number; W: number };
+      55 -  winner: Winner | null;        // non-null iff status === 'fin
+         -ished'                                                         
+      58 +  winner: Winner | null;        // non-null iff status === 'fin
+         +ished', except endReason 'cancelled' (no winner)               
+      59    endReason: EndReason | null;  // non-null iff status === 'fin
+          ished'
+      60    analysisStatus: AnalysisStatus;
+      61    createdAt: string;            // ISO 8601
+     ...
+      206  // Single elimination, 2..8 players, accounts only. Reads are 
+           public; every write needs an
+      207  // account with a claimed username. Bracket math lives in brac
+           ket.ts.
+      208  
+      206 -export type TournamentStatus = 'registering' | 'active' | 'fin
+          -ished';                                                       
+      209 +/** 'cancelled': ended by the organizer before a champion was 
+          +decided. Never deleted. */                                    
+      210 +export type TournamentStatus = 'registering' | 'active' | 'fin
+          +ished' | 'cancelled';                                         
+      211  
+      212  export interface TournamentPlayer {
+      213    accountId: string;
+     ...
+      218    tournamentId: string;
+      219    name: string;                 // trimmed, 1..40 chars
+      220    status: TournamentStatus;
+      217 -  /** Runs the tournament (starts it, forfeits no-shows). Not 
+          -a player unless they also entered. */                         
+      221 +  /** Runs the tournament (starts it, forfeits no-shows, can e
+          +nd it). Not a player unless they also entered. */             
+      222    organizer: TournamentPlayer;
+      223    maxPlayers: number;           // 2..8
+      224    entrantCount: number;
+      221 -  winner: TournamentPlayer | null;  // non-null iff status ===
+          - 'finished'                                                   
+      225 +  winner: TournamentPlayer | null;  // non-null iff status ===
+          + 'finished' (never for 'cancelled')                           
+     … 6 more lines (ctrl+o to expand)
+
+⏺ Now GameService.abort, the repo additions and the service changes.
+
+⏺ Bash(python3 - <<'EOF'
+      def edit(p, pairs):…)
+  ⎿  Updated backend/src/db/tournamentsRepo.ts (+30 -3)
+      161    await c.query(`UPDATE tournaments SET status = 'finished', w
+           inner_id = $2, finished_at = now() WHERE id = $1`, [id, winner
+           Id]);
+      162  }
+      163  
+      164 +export async function markCancelled(c: Db, id: string): Promis
+          +e<void> {                                                     
+      165 +  await c.query(`UPDATE tournaments SET status = 'cancelled', 
+          +finished_at = now() WHERE id = $1`, [id]);                    
+      166 +}                                                             
+      167 +                                                              
+      168 +/** Games of matches still being played (created, no winner ye
+          +t). */                                                        
+      169 +export async function playingGameIds(c: Db, id: string): Promi
+          +se<string[]> {                                                
+      170 +  const { rows } = await c.query<{ game_id: string }>(        
+      171 +    'SELECT game_id FROM tournament_matches WHERE tournament_i
+          +d = $1 AND game_id IS NOT NULL AND winner_id IS NULL',        
+      172 +    [id],                                                     
+      173 +  );                                                          
+      174 +  return rows.map((r) => r.game_id);                          
+      175 +}                                                             
+      176 +                                                              
+      177 +/** Games still active in cancelled tournaments (the server di
+          +ed between cancelling and aborting). */                       
+      178 +export async function listOrphanedCancelledGames(): Promise<st
+          +ring[]> {                                                     
+      179 +  const { rows } = await pool.query<{ game_id: string }>(     
+      180 +    `SELECT m.game_id                                         
+      181 +       FROM tournament_matches m                              
+      182 +       JOIN tournaments t ON t.id = m.tournament_id           
+      183 +       JOIN games g ON g.id = m.game_id                       
+      184 +      WHERE t.status = 'cancelled' AND g.status = 'active'`,  
+      185 +  );                                                          
+      186 +  return rows.map((r) => r.game_id);                          
+      187 +}                                                             
+      188 +                                                              
+      189  export interface MatchRow {
+      190    tournament_id: string;
+      191    round: number;
+     ...
+      249    return rows[0].username;
+      250  }
+      251  
+      227 -/** Finished tournament games whose result never reached the b
+          -racket (e.g. the server died in between). */                  
+      252 +/** Finished games in active tournaments whose result never re
+          +ached the bracket (e.g. the server died in between). */       
+      253  export async function listUnrecordedResults(): Promise<{ gameI
+           d: string; winner: Winner }[]> {
+      254    const { rows } = await pool.query<{ game_id: string; winner:
+            Winner }>(
+      255      `SELECT m.game_id, g.winner
+      231 -       FROM tournament_matches m JOIN games g ON g.id = m.game
+          -_id                                                           
+     … 8 more lines (ctrl+o to expand)
+  ⎿  Updated backend/src/game/GameService.ts (+24 -0)
+      312      });
+      313    }
+      314  
+      315 +  /**                                                         
+      316 +   * Ends an active game with no winner because its tournament
+          + was cancelled.                                               
+      317 +   * Returns false (and does nothing) if the game isn't active
+          +, e.g. it just finished on its own.                           
+      318 +   */                                                         
+      319 +  async abort(gameId: string): Promise<boolean> {             
+      320 +    return this.withLock(gameId, async () => {                
+      321 +      const g = await this.mustLoad(gameId);                  
+      322 +      if (g.status !== 'active') return false;                
+      323 +      const snapshot: GameSnapshotUpdate = {                  
+      324 +        ...snapshotOf(g),                                     
+      325 +        status: 'finished',                                   
+      326 +        turn: null,                                           
+      327 +        winner: null,                                         
+      328 +        endReason: 'cancelled',                               
+      329 +        analysisStatus: g.moves.length > 0 ? 'pending' : 'none
+          +',                                                            
+      330 +        finishedAt: new Date(),                               
+      331 +      };                                                      
+      332 +      await repo.updateGame(gameId, snapshot);                
+      333 +      Object.assign(g, snapshot);                             
+      334 +      this.emit(g);                                           
+      335 +      return true;                                            
+      336 +    });                                                       
+      337 +  }                                                           
+      338 +                                                              
+      339    /** Moves of a game (for the analysis runner); null if the g
+           ame doesn't exist. */
+      340    async getMoves(gameId: string): Promise<{ status: GameStatus
+           ; moves: PlayedMove[] } | null> {
+      341      const g = await this.load(gameId);
+
+⏺ Now the service changes: cancel, the active-status guards, and boot cleanup.
+
+⏺ Bash(python3 - <<'EOF'
+      p='backend/src/tournament/TournamentService.ts'…)
+  ⎿  Updated README.md (+1 -1)
+      73  Spend 30 mins focusing on the UI and making it more than just a
+           basic app.
+      74  Spend the remaining time on hosting this on Vercel so that in t
+          he next working session I can embed real AI functionality with 
+          my API without having to share the .env.
+      75  
+      76 -Finished with successful, account creation,                    
+      76 +Finished with successful, account creation, tournament         
+      77  
+      78  ---
+      79  
+  ⎿  Updated backend/src/http/routes.ts (+7 -2)
+      39  };
+      40  
+      41  const GAME_STATUSES: readonly GameStatus[] = ['waiting', 'activ
+          e', 'finished'];
+      42 -const TOURNAMENT_STATUSES: readonly TournamentStatus[] = ['regi
+         -stering', 'active', 'finished'];                               
+      42 +const TOURNAMENT_STATUSES: readonly TournamentStatus[] = ['regi
+         +stering', 'active', 'finished', 'cancelled'];                  
+      43  
+      44  function sendError(res: Response, code: ErrorCode, message: str
+          ing): void {
+      45    const body: ApiError = { error: { code, message } };
+     ...
+      220    r.get('/tournaments', wrap(async (req, res) => {
+      221      const { status, limit } = req.query;
+      222      if (status !== undefined && !TOURNAMENT_STATUSES.includes(
+           status as TournamentStatus)) {
+      223 -      throw new GameError('BAD_REQUEST', '`status` must be one
+          - of registering, active, finished');                          
+      223 +      throw new GameError('BAD_REQUEST', '`status` must be one
+          + of registering, active, finished, cancelled');               
+      224      }
+      225      const list = await tournaments.list({ status: status as To
+           urnamentStatus | undefined, limit: parseLimit(limit) });
+      226      const body: ListTournamentsResponse = { tournaments: list 
+           };
+     ...
+      253      res.json(body);
+      254    }));
+      255  
+      256 +  r.post('/tournaments/:id/cancel', wrap(async (req, res) => {
+      257 +    const body: TournamentDetail = await tournaments.cancel(re
+          +q.params.id, await requireAccount(req));                      
+      258 +    res.json(body);                                           
+      259 +  }));                                                        
+      260 +                                                              
+      261    r.post('/tournaments/:id/matches/:round/:slot/forfeit', wrap
+           (async (req, res) => {
+      262      const account = await requireAccount(req);
+      263      const { round, slot } = parseMatchRef(req.params);
+  ⎿  Updated backend/src/server.ts (+1 -1)
+      57    const requeued = await analysis.requeueOnBoot();
+      58    if (requeued > 0) console.log(`[analysis] re-queued ${requeue
+          d} game(s) from a previous run`);
+      59    const reconciled = await tournaments.reconcileOnBoot();
+      60 -  if (reconciled > 0) console.log(`[tournament] recorded ${reco
+         -nciled} result(s) from a previous run`);                       
+      60 +  if (reconciled > 0) console.log(`[tournament] reconciled ${re
+         +conciled} game(s) from a previous run`);                       
+      61  
+      62    const shutdown = () => {
+      63      analysis.stop();
+  ⎿  Updated backend/src/tournament/TournamentService.ts (+29 -3)
+      127    async forfeit(id: string, account: Account, round: number, s
+           lot: number, loser: Player): Promise<TournamentDetail> {
+      128      const gameId = await this.locked(id, async (c, t) => {
+      129        if (t.organizer_id !== account.id) throw new GameError('
+           FORBIDDEN', 'Only the organizer can forfeit a match');
+      130 +      if (t.status !== 'active') throw new GameError('TOURNAME
+          +NT_NOT_OPEN', 'The tournament is not in progress');           
+      131        const m = await repo.getMatch(c, id, round, slot);
+      132        if (!m) throw new GameError('BAD_REQUEST', 'No such matc
+           h');
+      133        if (!m.game_id || m.winner_id) throw new GameError('TOUR
+           NAMENT_NOT_OPEN', 'That match is not being played');
+     ...
+      139      return this.get(id);
+      140    }
+      141  
+      141 -  /** Feeds a finished game's result into its bracket. A no-op
+          - for casual games and repeats. */                             
+      142 +  /**                                                         
+      143 +   * Organizer only: ends the tournament before it has a champ
+          +ion. The bracket freezes as it                                
+      144 +   * stands, and games still being played are force-ended with
+          + no winner. Never deletes anything.                           
+      145 +   */                                                         
+      146 +  async cancel(id: string, account: Account): Promise<Tourname
+          +ntDetail> {                                                   
+      147 +    const playing = await this.locked(id, async (c, t) => {   
+      148 +      if (t.organizer_id !== account.id) throw new GameError('
+          +FORBIDDEN', 'Only the organizer can end the tournament');     
+      149 +      if (t.status !== 'registering' && t.status !== 'active')
+          + {                                                            
+      150 +        throw new GameError('TOURNAMENT_NOT_OPEN', 'The tourna
+          +ment is already over');                                       
+      151 +      }                                                       
+      152 +      await repo.markCancelled(c, id);                        
+      153 +      return repo.playingGameIds(c, id);                      
+      154 +    });                                                       
+      155 +    // After the commit: a game finishing on its own meanwhile
+          + is ignored by recordResult.                                  
+      156 +    // If we die before these run, reconcileOnBoot finishes th
+          +e job.                                                        
+      157 +    for (const gameId of playing) await this.games.abort(gameI
+          +d);                                                           
+      158 +    return this.get(id);                                      
+      159 +  }                                                           
+      160 +                                                              
+      161 +  /** Feeds a finished game's result into its bracket. A no-op
+          + for casual games, repeats and ended tournaments. */          
+      162    async recordResult(gameId: string, winner: Winner): Promise<
+           void> {
+      163      const match = await repo.matchForGame(pool, gameId);
+      164      if (!match || match.winner_id) return;
+      165      await this.locked(match.tournament_id, async (c, t) => {
+      166        const m = await repo.matchForGame(c, gameId);
+      167        if (!m || m.winner_id) return; // someone else recorded 
+           it while we waited for the lock
+      168 +      if (t.status !== 'active') return; // cancelled: the bra
+          +cket is frozen                                                
+      169        const seat = matchWinner(winner);
+      170        await this.decide(c, t, m.round, m.slot, (seat === 'B' ?
+            m.black_id : m.white_id)!);
+     … 18 more lines (ctrl+o to expand)
+
+⏺ Backend typechecks. Now the frontend. First I'll read the redesigned
+  tournament pages, since they changed.
+
+⏺ Bash(cat frontend/src/pages/TournamentPage.tsx; sed -n 20,100p
+      frontend/src/pages/TournamentsPage.tsx; sed -n 80,100p
+      frontend/src/components/RecentGames.tsx; sed -n…)
+  ⎿  (No output)
+
+⏺ I'll wire up the client layer and the result labels.
+
+⏺ Bash(python3 - <<'EOF'
+      def edit(p, pairs):…)
+  ⎿  Updated frontend/src/components/RecentGames.tsx (+1 -0)
+      85  
+      86  /** Compact one-line result for list rows; the discs next to th
+          e names already show colours. */
+      87  function shortResult(g: GameSummary): string {
+      88 +  if (g.endReason === 'cancelled') return 'Tournament cancelled
+         +';                                                             
+      89    if (!g.winner) return '';
+      90    if (g.winner === 'draw') return `Draw ${g.counts.B}–${g.count
+          s.W}`;
+      91    const name = g.players[g.winner]?.name ?? (g.winner === 'B' ?
+           'Black' : 'White');
+  ⎿  Updated frontend/src/data/GameClient.ts (+2 -0)
+       95    leaveTournament(id: string): Promise<TournamentDetail>;
+       96    /** Organizer only. */
+       97    startTournament(id: string): Promise<TournamentDetail>;
+       98 +  /** Organizer only: ends the tournament (registering or acti
+          +ve); games in progress end with no winner. */                 
+       99 +  cancelTournament(id: string): Promise<TournamentDetail>;    
+      100    /** Organizer only: the `loser` seat forfeits the match's ga
+           me. */
+      101    forfeitMatch(id: string, round: number, slot: number, loser:
+            Player): Promise<TournamentDetail>;
+      102    /** POST /api/games/:id/seat: a seat token for the signed-in
+            account's seat (tournament games). */
+  ⎿  Updated frontend/src/data/httpClient.ts (+1 -0)
+      152      joinTournament: (id) => call<TournamentDetail>('POST', `/t
+           ournaments/${encodeURIComponent(id)}/join`),
+      153      leaveTournament: (id) => call<TournamentDetail>('POST', `/
+           tournaments/${encodeURIComponent(id)}/leave`),
+      154      startTournament: (id) => call<TournamentDetail>('POST', `/
+           tournaments/${encodeURIComponent(id)}/start`),
+      155 +    cancelTournament: (id) => call<TournamentDetail>('POST', `
+          +/tournaments/${encodeURIComponent(id)}/cancel`),              
+      156      forfeitMatch: (id, round, slot, loser) =>
+      157        call<TournamentDetail>('POST', `/tournaments/${encodeURI
+           Component(id)}/matches/${round}/${slot}/forfeit`, { loser }),
+      158      claimSeat: (gameId) => call<SeatResponse>('POST', `/games/
+           ${encodeURIComponent(gameId)}/seat`),
+  ⎿  Updated frontend/src/data/mockClient.ts (+3 -0)
+      262      async startTournament() {
+      263        throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+           not available in mock mode');
+      264      },
+      265 +    async cancelTournament() {                                
+      266 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      267 +    },                                                        
+      268      async forfeitMatch() {
+      269        throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+           not available in mock mode');
+      270      },
+  ⎿  Updated frontend/src/format.ts (+3 -1)
+      32  }
+      33  
+      34  export function resultText(game: GameSummary): string {
+      35 -  if (game.status !== 'finished' || !game.winner) return '';   
+      35 +  if (game.status !== 'finished') return '';                   
+      36 +  if (game.endReason === 'cancelled') return 'Game ended: tourn
+         +ament cancelled';                                              
+      37 +  if (!game.winner) return '';                                 
+      38    if (game.winner === 'draw') return `Draw, ${game.counts.B}–${
+          game.counts.W}`;
+      39    const loser = game.winner === 'B' ? 'W' : 'B';
+      40    const how =
+  ⎿  … 1 more file changed
+
+⏺ Now the tournament page, the bracket and the list.
+
+⏺ Bash(python3 - <<'EOF'
+      def edit(p, pairs):…)  ⎿  Updated frontend/src/components/Bracket.tsx (+14 -4)
+      15  export function Bracket({ tournament: t, viewerId, isOrganizer,
+           busy, onPlay, onForfeit }: Props) {
+      16    const seeds = new Map(t.entrants.map((e) => [e.accountId, e.s
+          eed]));
+      17    const firstRoundSlots = 2 ** (t.rounds - 1);
+      18 +  const frozen = t.status === 'cancelled';                     
+      19  
+      20    return (
+      21      <div className="bracket" style={{ gridTemplateColumns: `rep
+          eat(${t.rounds}, minmax(200px, 1fr))` }}>
+     ...
+      35                    <MatchCard
+      36                      m={m}
+      37                      seeds={seeds}
+      37 -                    viewerId={viewerId}                        
+      38 +                    viewerId={frozen ? null : viewerId}        
+      39 +                    frozen={frozen}                            
+      40                      isOrganizer={isOrganizer && t.status === 'a
+          ctive'}
+      41                      busy={busy}
+      42                      onPlay={onPlay}
+     ...
+      59    busy,
+      60    onPlay,
+      61    onForfeit,
+      60 -}: Omit<Props, 'tournament'> & { m: TournamentMatch; seeds: Map
+         -<string, number | null> }) {                                   
+      62 +  frozen,                                                      
+      63 +}: Omit<Props, 'tournament'> & { m: TournamentMatch; seeds: Map
+         +<string, number | null>; frozen: boolean }) {                  
+      64    const bye = m.status === 'decided' && !m.gameId;
+      65    const isPlayer = viewerId !== null && (m.black?.accountId ===
+           viewerId || m.white?.accountId === viewerId);
+      66  
+     ...
+      83        {row(m.black, 'B')}
+      84        {row(m.white, 'W')}
+      85        <div className="bracket-actions">
+      83 -        {m.status === 'playing' && m.gameId && (               
+      86 +        {!frozen && m.status === 'playing' && m.gameId && (    
+      87            <>
+      88              {isPlayer ? (
+      89                <button type="button" className="btn btn-primary 
+          btn-small" disabled={busy} onClick={() => onPlay(m)}>
+     ...
+      109              )}
+      110            </>
+      111          )}
+      112 +        {frozen && m.status === 'playing' && m.gameId && (    
+      113 +          <Link to={`/game/${m.gameId}/analysis`} className="b
+          +tn btn-small">                                                
+      114 +            Review                                            
+      115 +          </Link>                                             
+     … 13 more lines (ctrl+o to expand)
+  ⎿  Updated frontend/src/pages/TournamentPage.tsx (+41 -7)
+       9  import { Bracket } from '../components/Bracket';
+      10  import { errorText, fmtDate } from '../format';
+      11  
+      12 +const STATUS_LABEL: Record<TournamentDetail['status'], (t: Tour
+         +namentDetail) => string> = {                                   
+      13 +  registering: (t) => `Open · ${t.entrantCount}/${t.maxPlayers}
+         +`,                                                             
+      14 +  active: () => 'In progress',                                 
+      15 +  finished: () => 'Finished',                                  
+      16 +  cancelled: () => 'Cancelled',                                
+      17 +};                                                             
+      18 +                                                               
+      19  /** No tournament socket room yet: poll while games can still c
+          hange the bracket. */
+      20  const POLL_MS = 5000;
+      21  
+     ...
+      46      void refresh();
+      47    }, [refresh]);
+      48  
+      42 -  const finished = t?.status === 'finished';                   
+      49 +  const over = t?.status === 'finished' || t?.status === 'cance
+         +lled';                                                         
+      50    useEffect(() => {
+      44 -    if (finished) return;                                      
+      51 +    if (over) return;                                          
+      52      const timer = setInterval(() => {
+      53        if (document.visibilityState === 'visible') void refresh(
+          );
+      54      }, POLL_MS);
+      55      return () => clearInterval(timer);
+      49 -  }, [refresh, finished]);                                     
+      56 +  }, [refresh, over]);                                         
+      57  
+      58    /** Runs a write that returns the fresh tournament. */
+      59    async function act(fn: () => Promise<TournamentDetail>) {
+     ...
+       88      void act(() => client.forfeitMatch(id, m.round, m.slot, lo
+           ser));
+       89    }
+       90  
+       91 +  function endTournament(current: TournamentDetail) {         
+       92 +    const playing = current.matches.filter((m) => m.status ===
+          + 'playing').length;                                           
+       93 +    const question =                                          
+       94 +      current.status === 'registering'                        
+       95 +        ? 'Cancel this tournament? Registration closes and no 
+          +games will be played.'                                        
+       96 +        : `End the tournament now? No champion will be declare
+          +d${                                                           
+       97 +            playing > 0 ? `, and ${playing} game${playing === 
+          +1 ? '' : 's'} in progress will be stopped` : ''               
+     … 45 more lines (ctrl+o to expand)
+  ⎿  Updated frontend/src/pages/TournamentsPage.tsx (+8 -2)
+      33      ? [
+      34          { title: 'Open for entry', empty: 'Nothing open right n
+          ow. Create one!', items: list.filter((t) => t.status === 'regis
+          tering') },
+      35          { title: 'In progress', empty: 'No tournaments in progr
+          ess.', items: list.filter((t) => t.status === 'active') },
+      36 -        { title: 'Finished', empty: 'No finished tournaments ye
+         -t.', items: list.filter((t) => t.status === 'finished') },     
+      36 +        {                                                      
+      37 +          title: 'Finished',                                   
+      38 +          empty: 'No finished tournaments yet.',               
+      39 +          items: list.filter((t) => t.status === 'finished' || 
+         +t.status === 'cancelled'),                                     
+      40 +        },                                                     
+      41        ]
+      42      : [];
+      43  
+     ...
+      79  
+      80  function TournamentRow({ t }: { t: TournamentSummary }) {
+      81    const detail =
+      78 -    t.status === 'finished' && t.winner                        
+      82 +    t.status === 'cancelled'                                   
+      83 +      ? 'Cancelled'                                            
+      84 +      : t.status === 'finished' && t.winner                    
+      85        ? `Won by @${t.winner.username}`
+      86        : t.status === 'registering'
+      87          ? `${t.entrantCount}/${t.maxPlayers} players`
+
+⏺ Adding the cancelled styles, then typechecking everything.
+
+⏺ Bash(python3 - <<'EOF'
+      p='frontend/src/styles.css'…)
+  ⎿  Updated frontend/src/styles.css (+3 -0)
+      177  .status-pill.analysis-done, .status-pill.tournament-registerin
+           g { border-color: rgba(78, 125, 91, 0.45); color: var(--cls-be
+           st); background: rgba(78, 125, 91, 0.08); }
+      178  .status-pill.analysis-failed { border-color: rgba(158, 42, 43,
+            0.4); color: var(--danger); }
+      179  .status-pill.tournament-active { border-color: rgba(169, 121, 
+           28, 0.45); color: var(--gold); }
+      180 +.status-pill.tournament-cancelled { border-color: rgba(158, 42
+          +, 43, 0.4); color: var(--danger); }                           
+      181  
+      182  .you-tag { font-size: 0.64rem; font-weight: 700; text-transfor
+           m: uppercase; letter-spacing: 0.08em; background: var(--accent
+           ); color: #fff; padding: 1px 6px; border-radius: 3px; }
+      183  .guest-tag { font-size: 0.64rem; font-weight: 700; text-transf
+           orm: uppercase; letter-spacing: 0.08em; color: var(--muted); b
+           order: 1px solid var(--line-strong); padding: 0 5px; border-ra
+           dius: 3px; }
+     ...
+      345  .result-banner strong { font-family: var(--serif); font-size: 
+           1.4rem; }
+      346  .result-banner.win { background: var(--accent); color: #fff; }
+      347  .champion { margin-bottom: 0; border-left: 4px solid var(--gol
+           d); }
+      348 +.result-banner.cancelled { margin-bottom: 0; border-left: 4px 
+          +solid var(--danger); }                                        
+      349  
+      350  .analysis-bar { margin: 8px 0; display: flex; flex-direction: 
+           column; gap: 6px; }
+      351  .bar { height: 4px; background: var(--surface-3); border-radiu
+           s: 999px; overflow: hidden; position: relative; }
+     ...
+      544  
+      545  .tournament { display: flex; flex-direction: column; gap: 16px
+           ; }
+      546  .tournament-head { display: flex; justify-content: space-betwe
+           en; align-items: flex-start; gap: 12px; }
+      547 +.tournament-head-side { display: flex; flex-direction: column;
+          + align-items: flex-end; gap: 8px; }                           
+      548  .tournament-head h1 { margin-bottom: 0.2rem; }
+      549  .entrant-list { margin: 0 0 8px; padding-left: 1.4rem; display
+           : grid; grid-template-columns: repeat(auto-fill, minmax(180px,
+            1fr)); gap: 6px 16px; }
+      550  .entrant-list li { display: flex; align-items: center; gap: 8p
+           x; font-weight: 700; }
+
+⏺ Typechecking passed. Now I'll test the cancel flow against a fresh throwaway
+  database, covering cancellation during registration, mid-bracket cancellation
+  with a game in progress, permission refusals, and crash recovery.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/538e2dfb-69ab-4aff-9263-f38fd5efa73d/scratchpad;
+      R=/Users/mitchelrifae/Desktop/Repo…)
+  ⎿  (No output)
+  ⎿  (timeout 2m 30s)
+
+⏺ All three cancel scenarios pass. Next I'll re-run the original tournament test
+  for regressions, and check the new endpoint over HTTP.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/538e2dfb-69ab-4aff-9263-f38fd5efa73d/scratchpad; cd
+      /Users/mitchelrifae/Desktop/Rep…)
+  ⎿  Updated README.md (+1 -1)
+      75  
+      76  Finished with successful, account and tournament creation along
+           with vercel, render, and supabase integration for hosting. Did
+           a complete UI redesign to make this feel like an actual app, n
+          ot just a side project.
+      77  
+      78 -Tomorrow or the next working session, going to spend my remaini
+         -ng time focusing on the                                        
+      78 +Tomorrow or the next working session, going to spend my remaini
+         +ng time focusing on my competitive edge                        
+      79  
+      80  ---
+      81  
+  ⎿  (timeout 2m 30s)
+
+⏺ No regressions, and the cancelled game with one move was analyzed as expected.
+  Last, the deviations doc and the unit tests.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie && cat >>
+      docs/contract-deviations.md <<'EOF'
+      | T10 | Ending early | — | The organizer can end a tournamen…)
+  ⎿  Updated docs/contract-deviations.md (+2 -0)
+      123  | T7 | No-shows | Abandonment rules (§7.1) | The organizer can
+            forfeit a playing match: `POST /api/tournaments/:id/matches/:
+           round/:slot/forfeit {loser}`. The game ends with `endReason: '
+           forfeit'` and still gets analyzed. | In a knockout, a single s
+           tuck game blocks the whole bracket. Clocks and automatic forfe
+           its remain roadmap items. |
+      124  | T8 | `types.ts` | Frozen | Added `Tournament*` types, `Match
+           Status`, `ForfeitRequest`, `EndReason 'forfeit'`, and `ErrorCo
+           de` values `FORBIDDEN` (403), `TOURNAMENT_NOT_FOUND` (404), `T
+           OURNAMENT_FULL` and `TOURNAMENT_NOT_OPEN` (409). Bracket math 
+           lives in `shared/src/bracket.ts` (unit tested). | These are ad
+           ditive changes, and the server and UI share the same bracket m
+           ath. |
+      125  | T9 | Live updates | — | The tournament page polls every 5 se
+           conds while a tournament isn't finished. There's no tournament
+            socket room. | A bracket changes once per game, so polling is
+            enough for now. |
+      126 +| T10 | Ending early | — | The organizer can end a tournament 
+          +that is `registering` or `active` (`POST /api/tournaments/:id/
+          +cancel`). It becomes `cancelled`, with `finished_at` as the en
+          +d time, and it is **never deleted**, so links keep working. Th
+          +e bracket freezes as it stood. Games still in progress are for
+          +ce-ended. From then on, late results, forfeits, joins and star
+          +ts are all refused. On boot, the server force-ends any game le
+          +ft running by a crash between the cancel and the abort. | Orga
+          +nizers need a way out of a stalled or abandoned event. Keeping
+          + the record preserves every game already played. |            
+      127 +| T11 | Finished games without a winner | `winner` is non-null
+          + iff `status === 'finished'` (§3) | One exception: `endReason:
+          + 'cancelled'`. A tournament game force-ended by cancellation i
+          +s `finished` with `winner: null`. It is still analyzed if it h
+          +as moves. The UI labels it "Tournament cancelled". | No one wo
+          +n, and inventing a result would be worse. Every consumer alrea
+          +dy tolerated a null winner. |                                 
+
+⏺ Organizers can now end a tournament, and it works in my tests. Games still in
+  progress are force-ended, and cancelled tournaments stay visible as
+  "Cancelled" and are never deleted. Nothing is committed. The new migration
+  (005_tournament_cancel.sql) runs automatically when the server starts, or you
+  can run it with npm run migrate -w backend.
+
+  How I checked it: I ran the real service code against a throwaway local
+  Postgres (not your hosted database):
+  - Cancel during registration: only the organizer can do it, and afterwards
+    joining, starting and cancelling again are all refused.
+  - Cancel mid-bracket with a game in progress: that game ends with no winner
+    and is marked "cancelled", and it still gets analyzed. Results already
+    decided are kept, and the next-round game is never created. A game result
+    that arrives after the cancel is ignored, and a forfeit is refused.
+  - Crash recovery: if the server dies between cancelling and ending the games,
+    it ends the leftover game on the next start. Running it a second time does
+    nothing.
+  - No regressions: the original tournament test from last time still passes.
+    Typechecks pass and all 41 unit tests pass. Over HTTP, the new endpoint
+    refuses callers who aren't signed in, and filtering the list by "cancelled"
+    works.
+  - Not tested: I haven't clicked through the UI in a browser.
+
+  What changed:
+  - Backend: a new POST /api/tournaments/:id/cancel endpoint (organizer only).
+    The tournament is marked cancelled first, then its in-progress games are
+    ended, so the bracket can't advance while that happens. This also fixes a
+    gap in the existing code: the organizer could forfeit a match in a
+    tournament that wasn't in progress.
+  - Game contract: there's a new end reason, 'cancelled', and it's the one case
+    where a finished game has no winner. I recorded this in
+    contract-deviations.md (docs/contract-deviations.md) as T10 and T11.
+  - Tournament page: the organizer gets a red button, Cancel tournament while
+    registering and End tournament once it has started. The confirmation says
+    how many games will be stopped. After cancelling, a "Cancelled by the
+    organizer" banner appears and the bracket becomes read-only: matches that
+    were cut off show Review, and matches never reached show "Not played".
+  - Elsewhere: the tournament list shows cancelled tournaments under Finished
+    with a "Cancelled" pill. On the game page, recent games list and review, a
+    stopped game reads "Tournament cancelled".
+
+  README.md also shows as modified, but that change isn't mine. I assume it's
+  your edit, so I left it alone.

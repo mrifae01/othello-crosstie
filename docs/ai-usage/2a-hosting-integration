@@ -1,0 +1,2760 @@
+
+❯ looking over and reviewing what has been done for this repo... basic frontend
+  and backend implementation are done along with basic end game analyzation.
+  Now, I want to look at scalablity and tournamenet creation/joining.
+
+  I have attached the requirements pdf for reference.
+
+  The first thing I want to do is user account creation.... It is not mandtory
+  that users are created, they can continue as guests, but in order to scale at
+  a tournament level I believe that users will have to create their own
+  accounts and therefore I want to integrate Supabase...
+
+⏺ I'll start by reviewing the repo's current structure so the Supabase auth plan
+  fits what's already there.
+
+⏺ Bash(git ls-files | grep -v -E '^(node_modules|.*lock)' && cat package.json &&
+      cat README.md | head -80 && git diff README.md | head -50)
+  ⎿  (No output)
+
+  Read 3 files (ctrl+o to expand)
+
+⏺ Clear picture of the current system. Let me check the contract docs and how
+  prompts are being logged before changing anything.
+
+⏺ Bash(ls -a && cat docs/contract-deviations.md && head -60
+      docs/ai-usage/session-prompts.md && grep -n "^#" design-contract.md | head
+      -50 && cat backend/src/db/migrat…)
+  ⎿  No matches found
+
+⏺ Bash(sed 's/=.*/=<redacted>/' .env && sed -n 1,40p design-contract.md && sed
+      -n 591,640p design-contract.md)
+  ⎿  (No output)
+
+⏺ Noting that the design contract cut accounts as a losing feature, I'll instead
+  frame them as enabling cross-game coaching and tournaments, and I'll
+  implement Supabase Auth (keeping guest mode key-free) with backend JWT
+  verification linking accounts to seats. Now checking the remaining frontend
+  touchpoints.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(sed -n 1,140p frontend/src/pages/GamePage.tsx && cat
+      frontend/src/components/PlayersCard.tsx && sed -n 1,60p
+      frontend/src/data/mockClient.ts && sed -n 100,160p…)
+  ⎿  (No output)
+
+⏺ Bash(grep -n "modal\|dialog\|backdrop" frontend/src/styles.css
+      frontend/src/components/LeaveGuard.tsx | head -20 && sed -n 160,238p
+      frontend/src/data/mockClient.ts)
+  ⎿  (No output)
+
+⏺ I'll go with accounts/Account naming, use the account's username for signed-in
+  seats while guests keep free-text names, retain seat tokens for the socket
+  layer, and ensure the app falls back to guest-only mode without Supabase keys.
+  Now installing dependencies.
+
+⏺ Bash(npm install jose -w backend 2>&1 | tail -3 && npm install
+      @supabase/supabase-js -w frontend 2>&1 | tail -3 && grep -E
+      "jose|supabase" backend/package.json front…)
+  ⎿  Updated backend/package.json (+1 -0)
+      14    "dependencies": {
+      15      "@othello/shared": "*",
+      16      "express": "^4.21.2",
+      17 +    "jose": "^6.2.12",                                         
+      18      "pg": "^8.13.1",
+      19      "socket.io": "^4.8.1"
+      20    },
+  ⎿  Updated frontend/package.json (+1 -0)
+      11    },
+      12    "dependencies": {
+      13      "@othello/shared": "*",
+      14 +    "@supabase/supabase-js": "^2.117.2",                       
+      15      "react": "^19.3.0",
+      16      "react-dom": "^19.3.0",
+      17      "react-router-dom": "^7.18.4",
+  ⎿  Updated package-lock.json (+112 -1)
+      26        "dependencies": {
+      27          "@othello/shared": "*",
+      28          "express": "^4.21.2",
+      29 +        "jose": "^6.2.12",                                     
+      30          "pg": "^8.13.1",
+      31          "socket.io": "^4.8.1"
+      32        },
+     ...
+      43        "version": "0.1.0",
+      44        "dependencies": {
+      45          "@othello/shared": "*",
+      46 +        "@supabase/supabase-js": "^2.117.2",                   
+      47          "react": "^19.3.0",
+      48          "react-dom": "^19.3.0",
+      49          "react-router-dom": "^7.18.4",
+     ...
+      1331        "integrity": "sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1
+            XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==",
+      1332        "license": "MIT"
+      1333      },
+      1334 +    "node_modules/@supabase/auth-js": {                      
+      1335 +      "version": "2.117.2",                                  
+      1336 +      "resolved": "https://registry.npmjs.org/@supabase/auth-
+           +js/-/auth-js-2.117.2.tgz",                                   
+      1337 +      "integrity": "sha512-Z3WnGwrphYZubrLbxp5Iv0tLA9A5GhvKzJ
+           +/ZXglxqwd2QEH2R4dXRltjVJ8sIn4xEW2BSFIGT0yALVJIgZeDYw==",     
+      1338 +      "license": "MIT",                                      
+      1339 +      "dependencies": {                                      
+      1340 +        "tslib": "2.8.1"                                     
+      1341 +      },                                                     
+      1342 +      "engines": {                                           
+      1343 +        "node": ">=22.0.0"                                   
+      1344 +      }                                                      
+      1345 +    },                                                       
+      1346 +    "node_modules/@supabase/functions-js": {                 
+      1347 +      "version": "2.117.2",                                  
+      1348 +      "resolved": "https://registry.npmjs.org/@supabase/funct
+           +ions-js/-/functions-js-2.117.2.tgz",                         
+      1349 +      "integrity": "sha512-6DT4ZIjmZxa9ANKaBIrjc86AyKrX8M376y
+           +nvNeOBBVad3eP7x3UHqWfDR2ynFkHGzCuOpr1A+kObmnahxuwuog==",     
+      1350 +      "license": "MIT",                                      
+      1351 +      "dependencies": {                                      
+      1352 +        "tslib": "2.8.1"                                     
+      1353 +      },                                                     
+      1354 +      "engines": {                                           
+      1355 +        "node": ">=22.0.0"                                   
+      1356 +      }                                                      
+     … 109 more lines (ctrl+o to expand)
+
+⏺ Deps are installed. Now I'm writing the backend: shared types, the migration,
+  and JWT verification.
+
+⏺ Bash(python3 - <<'EOF'
+      p='shared/src/types.ts'…)
+  ⎿  Updated shared/src/types.ts (+25 -0)
+      39  export type AnalysisStatus = 'none' | 'pending' | 'running' | '
+          done' | 'failed';
+      40  
+      41  export interface PlayerInfo {
+      42 +  /** Display name: the account's username for signed-in player
+         +s, free text for guests. */                                    
+      43    name: string;
+      44 +  /** The seat's account, or null for a guest seat. */         
+      45 +  accountId: string | null;                                    
+      46  }
+      47  
+      48  /** Lightweight game header: used in lists, in GameState, and i
+          n AnalysisResult. */
+     ...
+      151    | 'NOT_YOUR_TURN'
+      152    | 'ILLEGAL_MOVE'
+      153    | 'BAD_TOKEN'
+      154 +  | 'UNAUTHORIZED'     // missing/invalid/expired access token
+          + on an account endpoint                                       
+      155 +  | 'USERNAME_TAKEN'                                          
+      156    | 'INTERNAL';
+      157  
+      158  /** Body of every non-2xx REST response. */
+     ...
+      174    games: GameSummary[];
+      175  }
+      176  
+      177 +// ---------- Accounts ----------                             
+      178 +// Optional. Identity comes from Supabase Auth (a bearer acces
+          +s token on REST calls);                                       
+      179 +// the account row itself lives in our Postgres. Guests never 
+          +touch these endpoints.                                        
+      180 +                                                              
+      181 +export interface Account {                                    
+      182 +  /** Supabase auth user id (the JWT `sub`). */               
+      183 +  id: string;                                                 
+      184 +  /** 3..20 chars of [A-Za-z0-9_], unique case-insensitively. 
+          +Used as the seat name in games. */                            
+      185 +  username: string;                                           
+      186 +  createdAt: string;            // ISO 8601                   
+      187 +}                                                             
+      188 +                                                              
+      189 +/** GET /api/me. `account` is null when signed in but no usern
+          +ame has been claimed yet. */                                  
+      190 +export interface MeResponse {                                 
+      191 +  account: Account | null;                                    
+      192 +}                                                             
+      193 +                                                              
+      194 +/** PUT /api/me: claim (or change) the username. */           
+      195 +export interface ClaimUsernameRequest { username: string }    
+     … 4 more lines (ctrl+o to expand)
+
+⏺ Write(backend/migrations/002_accounts.sql)
+  ⎿  Wrote 20 lines to backend/migrations/002_accounts.sql
+      1 -- Optional accounts. Identity is Supabase Auth; this row is our
+      2 -- No FK to auth.users: locally the auth database is a different
+        Postgres entirely.
+      3 CREATE TABLE IF NOT EXISTS accounts (
+         auth user id (JWT `sub`)
+      5   username    text        NOT NULL CHECK (username ~ '^[A-Za-z0-9
+      6   created_at  timestamptz NOT NULL DEFAULT now()
+      7 );
+      8
+        accounts (lower(username));
+     … +21 lines (ctrl+o to expand)
+
+⏺ Write(backend/src/config.ts)
+  ⎿  Added 18 lines
+       1 +import { resolve, dirname } from 'node:path';                  
+       2 +import { fileURLToPath } from 'node:url';                      
+       3 +                                                               
+       4 +// One root .env serves the API and the web client. Never overr
+         +ides variables already set.                                    
+       5 +try {                                                          
+       6 +  process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta
+         +.url)), '../../.env'));                                        
+       7 +} catch {                                                      
+       8 +  // No .env: defaults below.                                  
+       9 +}                                                              
+      10 +                                                               
+      11  export const PORT = Number(process.env.PORT ?? 3001);
+      12  export const DATABASE_URL = process.env.DATABASE_URL ?? 'postgr
+          es://othello:othello@localhost:5433/othello';
+      13 +                                                               
+      14 +/**                                                            
+      15 + * Supabase Auth. Unset = accounts disabled and everyone plays 
+         +as a guest.                                                    
+      16 + * Falls back to the web client's variable so a single value in
+         + .env configures both.                                         
+      17 + */                                                            
+      18 +export const SUPABASE_URL = (process.env.SUPABASE_URL ?? proces
+         +s.env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');            
+      19 +/** Only for projects still on the legacy shared HS256 secret; 
+         +asymmetric keys are verified via JWKS. */                      
+      20 +export const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SEC
+         +RET ?? '';                                                     
+
+⏺ Write(backend/src/auth/verifyToken.ts)
+  ⎿  Wrote 39 lines to backend/src/auth/verifyToken.ts
+       1 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, t
+         ype JWTVerifyOptions } from 'jose';
+       3
+       4 /** The authenticated caller, as asserted by a verified Supabase
+          access token. */
+       6   userId: string;
+       7   email: string | null;
+       8 }
+      10 export const authEnabled = SUPABASE_URL !== '' || SUPABASE_JWT_S
+         ECRET !== '';
+     … +39 lines (ctrl+o to expand)
+
+⏺ That null! construct is ugly; let me rewrite the verify function cleanly.
+
+⏺ Update(backend/src/auth/verifyToken.ts)
+  ⎿  Added 5 lines, removed 9 lines
+      22  /** Returns the user for a valid access token, or null for anyt
+          hing invalid, expired or unverifiable. */
+      23  export async function verifyAccessToken(token: string): Promise
+          <AuthUser | null> {
+      24    try {
+      25 -    const { alg } = decodeProtectedHeader(token);              
+      26 -    const { payload } =                                        
+      27 -      alg === 'HS256'                                          
+      28 -        ? legacySecret                                         
+      29 -          ? await jwtVerify(token, legacySecret, options)      
+      30 -          : null!                                              
+      31 -        : jwks                                                 
+      32 -          ? await jwtVerify(token, jwks, options)              
+      33 -          : null!;                                             
+      25 +    const isLegacy = decodeProtectedHeader(token).alg === 'HS25
+         +6';                                                            
+      26 +    let payload;                                               
+      27 +    if (isLegacy && legacySecret) ({ payload } = await jwtVerif
+         +y(token, legacySecret, options));                              
+      28 +    else if (!isLegacy && jwks) ({ payload } = await jwtVerify(
+         +token, jwks, options));                                        
+      29 +    else return null;                                          
+      30      if (typeof payload.sub !== 'string') return null;
+      31      return { userId: payload.sub, email: typeof payload.email =
+          == 'string' ? payload.email : null };
+      32    } catch {
+
+⏺ Now the accounts repo and the game repo/service changes.
+
+⏺ Write(backend/src/db/accountsRepo.ts)
+  ⎿  Wrote 31 lines to backend/src/db/accountsRepo.ts
+       1 import type { Account } from '@othello/shared';
+       2 import { pool } from './pool';
+       3
+       4 interface AccountRow {
+       5   id: string;
+       7   created_at: Date;
+       8 }
+       9
+      10 const toAccount = (r: AccountRow): Account => ({ id: r.id, usern
+         ame: r.username, createdAt: r.created_at.toISOString() });
+     … +27 lines (ctrl+o to expand)
+
+⏺ Bash(python3 - <<'EOF'
+      p='backend/src/db/gamesRepo.ts'…)
+  ⎿  Updated backend/src/db/gamesRepo.ts (+28 -11)
+      23    status: GameStatus;
+      24    blackName: string;
+      25    whiteName: string | null;
+      26 +  blackAccountId: string | null;                               
+      27 +  whiteAccountId: string | null;                               
+      28    blackTokenHash: string;
+      29    whiteTokenHash: string | null;
+      30    board: Board;
+     ...
+      60    status: GameStatus;
+      61    black_name: string;
+      62    white_name: string | null;
+      63 +  black_account_id: string | null;                             
+      64 +  white_account_id: string | null;                             
+      65    black_token_hash: string;
+      66    white_token_hash: string | null;
+      67    board: string;
+     ...
+      88      status: row.status,
+      89      blackName: row.black_name,
+      90      whiteName: row.white_name,
+      91 +    blackAccountId: row.black_account_id,                      
+      92 +    whiteAccountId: row.white_account_id,                      
+      93      blackTokenHash: row.black_token_hash,
+      94      whiteTokenHash: row.white_token_hash,
+      95      board: boardFromString(row.board),
+     ...
+      114    return typeof id === 'string' && UUID_RE.test(id);
+      115  }
+      116  
+      111 -export async function createGame(input: { blackName: string; b
+          -lackTokenHash: string; board: Board }): Promise<GameRecord> { 
+      117 +/** Who is taking a seat: a display name, plus the account for
+          + signed-in players (null for guests). */                      
+      118 +export interface SeatHolder {                                 
+      119 +  name: string;                                               
+      120 +  accountId: string | null;                                   
+      121 +}                                                             
+      122 +                                                              
+      123 +export async function createGame(input: { black: SeatHolder; b
+          +lackTokenHash: string; board: Board }): Promise<GameRecord> { 
+      124    const { rows } = await pool.query<GameRow>(
+      113 -    `INSERT INTO games (black_name, black_token_hash, board)  
+      114 -     VALUES ($1, $2, $3) RETURNING *`,                        
+      115 -    [input.blackName, input.blackTokenHash, boardToString(inpu
+          -t.board)],                                                    
+      125 +    `INSERT INTO games (black_name, black_account_id, black_to
+          +ken_hash, board)                                              
+     … 44 more lines (ctrl+o to expand)
+  ⎿  Updated backend/src/game/GameService.ts (+10 -6)
+      17    type Player,
+      18  } from '@othello/shared';
+      19  import * as repo from '../db/gamesRepo';
+      20 -import type { GameRecord, GameSnapshotUpdate, MoveInsert } from
+         - '../db/gamesRepo';                                            
+      20 +import type { GameRecord, GameSnapshotUpdate, MoveInsert, SeatH
+         +older } from '../db/gamesRepo';                                
+      21  
+      22  /** A domain error that maps directly onto an `ErrorCode` for R
+          EST and socket acks. */
+      23  export class GameError extends Error {
+     ...
+      47    return {
+      48      gameId: g.id,
+      49      status: g.status,
+      50 -    players: { B: { name: g.blackName }, W: g.whiteName === nul
+         -l ? null : { name: g.whiteName } },                            
+      50 +    players: {                                                 
+      51 +      B: { name: g.blackName, accountId: g.blackAccountId },   
+      52 +      W: g.whiteName === null ? null : { name: g.whiteName, acc
+         +ountId: g.whiteAccountId },                                    
+      53 +    },                                                         
+      54      counts: { ...g.counts },
+      55      winner: g.winner,
+      56      endReason: g.endReason,
+     ...
+      165      return { state: toGameState(g), you: this.seatFor(g, token
+           ) };
+      166    }
+      167  
+      165 -  async createGame(blackName: string): Promise<{ gameId: strin
+          -g; playerToken: string }> {                                   
+      168 +  async createGame(black: SeatHolder): Promise<{ gameId: strin
+          +g; playerToken: string }> {                                   
+      169      const playerToken = newToken();
+      167 -    const g = await repo.createGame({ blackName, blackTokenHas
+          -h: hashToken(playerToken), board: initialBoard() });          
+      170 +    const g = await repo.createGame({ black, blackTokenHash: h
+          +ashToken(playerToken), board: initialBoard() });              
+      171      this.games.set(g.id, g);
+      172      return { gameId: g.id, playerToken };
+      173    }
+      174  
+      172 -  async joinGame(gameId: string, whiteName: string): Promise<{
+          - gameId: string; playerToken: string }> {                     
+      175 +  async joinGame(gameId: string, white: SeatHolder): Promise<{
+          + gameId: string; playerToken: string }> {                     
+      176      return this.withLock(gameId, async () => {
+      177        const g = await this.mustLoad(gameId);
+      178        if (g.status !== 'waiting' || g.whiteTokenHash !== null)
+            {
+      179          throw new GameError('GAME_FULL', 'This game already ha
+           s two players');
+      180        }
+      181        const playerToken = newToken();
+      179 -      const updated = await repo.joinGame(gameId, whiteName, h
+          -ashToken(playerToken));                                       
+     … 9 more lines (ctrl+o to expand)
+
+⏺ Now the routes: optional auth on create/join, plus /api/me endpoints.
+⏺ Bash(python3 - <<'EOF'
+      p='backend/src/http/routes.ts'…)
+  ⎿  Updated backend/src/http/routes.ts (+84 -14)
+       6    GameState,
+       7    GameStatus,
+       8    ListGamesResponse,
+       9 +  MeResponse,                                                  
+      10    SeatResponse,
+      11  } from '@othello/shared';
+      11 -import { listGames, pingDb } from '../db/gamesRepo';           
+      12 +import { listGames, pingDb, type SeatHolder } from '../db/games
+         +Repo';                                                         
+      13 +import { getAccount, upsertAccount } from '../db/accountsRepo';
+      14 +import { authEnabled, verifyAccessToken, type AuthUser } from '
+         +../auth/verifyToken';                                          
+      15  import type { AnalysisRunner } from '../analysis/AnalysisRunner
+          ';
+      16  import { GameError, toGameSummary, type GameService } from '../
+          game/GameService';
+      17  
+     ...
+      23    NOT_YOUR_TURN: 409,
+      24    ILLEGAL_MOVE: 400,
+      25    BAD_TOKEN: 403,
+      26 +  UNAUTHORIZED: 401,                                           
+      27 +  USERNAME_TAKEN: 409,                                         
+      28    INTERNAL: 500,
+      29  };
+      30  
+     ...
+       45    return name;
+       46  }
+       47  
+       48 +const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;                   
+       49 +                                                              
+       50 +function parseUsername(body: unknown): string {               
+       51 +  const raw = (body as { username?: unknown } | null)?.usernam
+          +e;                                                            
+       52 +  const username = typeof raw === 'string' ? raw.trim() : ''; 
+       53 +  if (!USERNAME_RE.test(username)) {                          
+       54 +    throw new GameError('BAD_REQUEST', '`username` must be 3–2
+          +0 letters, digits or underscores');                           
+       55 +  }                                                           
+       56 +  return username;                                            
+       57 +}                                                             
+       58 +                                                              
+       59 +function parseLimit(limit: unknown, fallback = 20): number {  
+       60 +  if (limit === undefined) return fallback;                   
+       61 +  const n = Number(limit);                                    
+       62 +  if (typeof limit !== 'string' || !Number.isInteger(n) || n <
+          + 1) {                                                         
+       63 +    throw new GameError('BAD_REQUEST', '`limit` must be a posi
+          +tive integer');                                               
+     … 101 more lines (ctrl+o to expand)
+
+⏺ Backend typechecks. I'll make start.mjs read the same root .env, then do an
+  end-to-end test of the auth path with a locally signed token.
+
+⏺ Bash(python3 - <<'EOF'
+      p='scripts/start.mjs'…)
+  ⎿  Updated .env.example (+10 -0)
+       2  # If DATABASE_URL is set, `npm start` skips Docker and uses thi
+          s database.
+       3  # DATABASE_URL=...
+       4  PORT=3001
+       5 +                                                               
+       6 +# ---- Accounts (Supabase Auth) ----                           
+       7 +# Leave unset to run guest-only: everything still works, games 
+         +just aren't tied to an account.                                
+       8 +# Both values are public (they ship to the browser). Find them 
+         +in the Supabase dashboard:                                     
+       9 +# Project Settings → API. The API reads VITE_SUPABASE_URL too, 
+         +so these two lines configure both.                             
+      10 +# VITE_SUPABASE_URL=https://<project-ref>.supabase.co          
+      11 +# VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...             
+      12 +#                                                              
+      13 +# Only for projects still using the legacy shared JWT secret (n
+         +ew projects use JWKS; leave unset):                            
+      14 +# SUPABASE_JWT_SECRET=...                                      
+  ⎿  Updated scripts/start.mjs (+7 -0)
+      10  
+      11  const root = resolve(dirname(fileURLToPath(import.meta.url)), '
+          ..');
+      12  
+      13 +// Same root .env the API and web client read, so DATABASE_URL 
+         +set there skips Docker here too.                               
+      14 +try {                                                          
+      15 +  process.loadEnvFile(resolve(root, '.env'));                  
+      16 +} catch {                                                      
+      17 +  // No .env: all settings are optional.                       
+      18 +}                                                              
+      19 +                                                               
+      20  function run(cmd, args, opts = {}) {
+      21    return spawnSync(cmd, args, { cwd: root, stdio: 'inherit', ..
+          .opts });
+      22  }
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/backend &&
+      (PORT=3099 SUPABASE_JWT_SECRET=test-secret-for-local-verification npx tsx
+      src/server.ts > /priv…)
+  ⎿  (No output)
+
+⏺ Bash(cat > /private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-c
+      rosstie/994afb70-8f48-4d9a-851f-ff0ecdd38a27/scratchpad/auth-check.ts
+      <<'EOF'
+      import {…)
+  ⎿  (No output)
+
+⏺ Every auth path behaves as intended, including the impersonation guard (the
+  "Impostor" name was ignored). Now I'll run the existing smoke test to check
+  for regressions.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(API_URL=http://localhost:3099 npx tsx scripts/smoke.ts 2>&1 | tail -15;
+      pkill -f "PORT=3099" ; lsof -tiTCP:3099 -sTCP:LISTEN | xargs -r kill)
+  ⎿  (No output)
+  ⎿  (timeout 3m)
+
+⏺ Backend done: smoke passes with no regressions. Now the frontend: the Supabase
+  client, auth context, account menu/dialogs, and signed-in seat forms.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/frontend && cat
+      tsconfig.json && grep -rn "import.meta.env" src | head && sed -n 60,110p
+      src/components/Le…)
+  ⎿  (No output)
+
+⏺ Bash(python3 - <<'EOF'
+      import re…)
+  ⎿  Updated frontend/src/data/GameClient.ts (+11 -1)
+       6   * never a concrete implementation.
+       7   */
+       8  import type {
+       9 +  Account,                                                     
+      10    AnalysisProgressPayload,
+      11    AnalysisReadyPayload,
+      12    AnalysisResult,
+     ...
+      50  }
+      51  
+      52  export interface GameClient {
+      52 -  /** POST /api/games → color 'B'. */                          
+      53 +  /** POST /api/games → color 'B'. Signed in with a username, t
+         +he server seats the account and ignores `name`. */             
+      54    createGame(name: string): Promise<SeatResponse>;
+      55    /** POST /api/games/:id/join → color 'W'. */
+      56    joinGame(gameId: string, name: string): Promise<SeatResponse>
+          ;
+     ...
+      70    move(gameId: string, playerToken: string, square: Square): Pr
+          omise<void>;
+      71    /** `game:resign`. */
+      72    resign(gameId: string, playerToken: string): Promise<void>;
+      73 +                                                               
+      74 +  // ---- Accounts (only called while signed in; see auth/AuthC
+         +ontext) ----                                                   
+      75 +                                                               
+      76 +  /** GET /api/me. null = signed in but no username claimed yet
+         +. */                                                           
+      77 +  getMe(): Promise<Account | null>;                            
+      78 +  /** PUT /api/me. Fails with USERNAME_TAKEN. */               
+      79 +  claimUsername(username: string): Promise<Account>;           
+      80 +  /** GET /api/me/games: the signed-in account's finished games
+         +, newest first. */                                             
+      81 +  listMyGames(limit?: number): Promise<GameSummary[]>;         
+      82  }
+  ⎿  Updated frontend/src/data/httpClient.ts (+28 -8)
+       6  import { io, type Socket } from 'socket.io-client';
+       7  import type {
+       8    Ack,
+       9 +  Account,                                                     
+      10    AnalysisResult,
+      11    ApiError,
+      12    ClientToServerEvents,
+      13    ErrorCode,
+      14    GameState,
+      15    ListGamesResponse,
+      16 +  MeResponse,                                                  
+      17    SeatResponse,
+      18    ServerToClientEvents,
+      19    SubscribeResult,
+     ...
+      26  
+      27  // ---------- REST ----------
+      28  
+      27 -async function request<T>(method: 'GET' | 'POST', path: string,
+         - body?: unknown): Promise<T> {                                 
+      29 +/** Current Supabase access token, or undefined for a guest. Su
+         +pplied by the composition root. */                             
+      30 +export type AccessTokenProvider = () => Promise<string | undefi
+         +ned>;                                                          
+      31 +                                                               
+      32 +async function request<T>(                                     
+      33 +  getAccessToken: AccessTokenProvider,                         
+      34 +  method: 'GET' | 'POST' | 'PUT',                              
+      35 +  path: string,                                                
+      36 +  body?: unknown,                                              
+      37 +): Promise<T> {                                                
+      38    let res: Response;
+      39    try {
+      40 +    const token = await getAccessToken();                      
+      41 +    const headers: Record<string, string> = {};                
+      42 +    if (body !== undefined) headers['Content-Type'] = 'applicat
+         +ion/json';                                                     
+      43 +    if (token) headers.Authorization = `Bearer ${token}`;      
+      44      res = await fetch(`/api${path}`, {
+      45        method,
+      32 -      headers: body === undefined ? undefined : { 'Content-Type
+         -': 'application/json' },                                       
+      46 +      headers,                                                 
+      47        body: body === undefined ? undefined : JSON.stringify(bod
+          y),
+      48      });
+      49    } catch {
+     … 31 more lines (ctrl+o to expand)
+  ⎿  Updated frontend/src/data/mockClient.ts (+13 -2)
+      118          state: {
+      119            gameId,
+      120            status: 'waiting',
+      121 -          players: { B: { name: n }, W: null },               
+      121 +          players: { B: { name: n, accountId: null }, W: null 
+          +},                                                            
+      122            counts: countDiscs(board),
+      123            winner: null,
+      124            endReason: null,
+     ...
+      142        if (g.state.status !== 'waiting' || g.state.players.W) t
+           hrow new GameClientError('GAME_FULL', 'Game is full');
+      143        const token = randomToken();
+      144        g.tokens.W = token;
+      145 -      g.state.players.W = { name: n };                        
+      145 +      g.state.players.W = { name: n, accountId: null };       
+      146        g.state.status = 'active';
+      147        g.state.turn = 'B';
+      148        g.state.legalMoves = getLegalMoves(g.state.board, 'B');
+     ...
+      232        broadcast(g);
+      233        void runAnalysis(g);
+      234      },
+      235 +                                                              
+      236 +    // Mock mode is guest-only (main.tsx never enables auth wi
+          +th it), so these are unreachable.                             
+      237 +    async getMe() {                                           
+      238 +      return null;                                            
+      239 +    },                                                        
+      240 +    async claimUsername() {                                   
+      241 +      throw new GameClientError('UNAUTHORIZED', 'Accounts are 
+          +not available in mock mode');                                 
+      242 +    },                                                        
+      243 +    async listMyGames() {                                     
+      244 +      return [];                                              
+      245 +    },                                                        
+      246    };
+      247  
+      248    return client;
+  ⎿  Updated frontend/src/format.ts (+2 -0)
+      16    NOT_YOUR_TURN: "It's not your turn.",
+      17    ILLEGAL_MOVE: "That move isn't legal.",
+      18    BAD_TOKEN: "You don't hold a seat in this game.",
+      19 +  UNAUTHORIZED: 'Your session has expired. Sign in again.',    
+      20 +  USERNAME_TAKEN: 'That username is taken.',                   
+      21    INTERNAL: 'Something went wrong on the server. Try again.',
+      22  };
+      23  
+  ⎿  Updated frontend/src/mocks/fixtures.ts (+4 -1)
+      82    return {
+      83      gameId: spec.id,
+      84      status: spec.status,
+      85 -    players: { B: { name: spec.black }, W: spec.white ? { name:
+         - spec.white } : null },                                        
+      85 +    players: {                                                 
+      86 +      B: { name: spec.black, accountId: null },                
+      87 +      W: spec.white ? { name: spec.white, accountId: null } : n
+         +ull,                                                           
+      88 +    },                                                         
+      89      counts: countDiscs(board),
+      90      winner,
+      91      endReason: finished ? (spec.endReason ?? 'normal') : null,
+  ⎿  … 1 more file changed
+
+⏺ Now the auth layer. It lives beside the GameClient, not inside it: Supabase
+  owns the session, and the GameClient just gets a token provider.
+
+⏺ Write(frontend/src/auth/supabase.ts)
+  ⎿  Wrote 10 lines to frontend/src/auth/supabase.ts
+       1 import { createClient, type SupabaseClient } from '@supabase/sup
+       2
+       3 const url = import.meta.env.VITE_SUPABASE_URL as string | undefi
+       4 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as str
+       5
+       6 /**
+         goes through GameClient.
+       8  * null when the project isn't configured, which leaves the app
+       9  */
+         teClient(url, key) : null;
+     … +5 lines (ctrl+o to expand)
+
+⏺ Write(frontend/src/auth/AuthContext.tsx)
+  ⎿  Wrote 117 lines to frontend/src/auth/AuthContext.tsx
+       1 /**
+       2  * Optional accounts. Supabase owns the session (sign-up, sign-i
+       3  * owns the Account (username). Guests never need any of this: e
+         very page works with
+       4  * `status: 'guest'` or `'disabled'`.
+       6 import { createContext, useCallback, useContext, useEffect, useM
+         emo, useRef, useState, type ReactNode } from 'react';
+       7 import type { SupabaseClient } from '@supabase/supabase-js';
+       9 import { useGameClient } from '../data/ClientContext';
+      10 import { errorText } from '../format';
+     … +130 lines (ctrl+o to expand)
+
+⏺ Caught two bugs in that effect as I wrote it: the closure reads a stale state,
+  and an initial signed-out session would be skipped, leaving the UI stuck on
+  loading. Fixing:
+
+⏺ Update(frontend/src/auth/AuthContext.tsx)
+  ⎿  Added 3 lines, removed 2 lines
+      59  
+      60    useEffect(() => {
+      61      if (!supabase) return;
+      62 +    let initial = true;                                        
+      63      // Fires INITIAL_SESSION on subscribe, then on every sign-i
+          n/out and token refresh.
+      64      const { data } = supabase.auth.onAuthStateChange((_event, s
+          ession) => {
+      65        const user = session?.user ? { id: session.user.id, email
+          : session.user.email ?? null } : null;
+      65 -      if (user?.id === userRef.current?.id && state.status !== 
+         -'loading') return; // token refresh: same user                 
+      66 +      if (!initial && user?.id === userRef.current?.id) return;
+         + // token refresh: same user, nothing to reload                
+      67 +      initial = false;                                         
+      68        userRef.current = user;
+      69        if (!user) return setState({ status: 'guest' });
+      70        // Deferred: supabase-js holds its auth lock during this 
+          callback, and getMe() reads the session.
+      71        setTimeout(() => loadAccount(user), 0);
+      72      });
+      73      return () => data.subscription.unsubscribe();
+      72 -    // eslint-disable-next-line react-hooks/exhaustive-deps -- 
+         -subscribe once per client                                      
+      74    }, [supabase, loadAccount]);
+      75  
+      76    const api = useMemo<AuthApi>(() => {
+
+⏺ Now the UI: account menu, sign-in dialog, and username picker.
+
+⏺ Write(frontend/src/components/AccountMenu.tsx)
+  ⎿  Wrote 228 lines to frontend/src/components/AccountMenu.tsx
+       1 import { useEffect, useRef, useState, type FormEvent, type React
+         Node } from 'react';
+       2 import { useAuth } from '../auth/AuthContext';
+       4 import { useToasts } from './Toasts';
+       5
+       6 /** Top-bar account control. Renders nothing when accounts are d
+         isabled. */
+       8   const auth = useAuth();
+       9   const toasts = useToasts();
+      10   const [signingIn, setSigningIn] = useState(false);
+     … +244 lines (ctrl+o to expand)
+
+⏺ Write(frontend/src/components/SeatForm.tsx)
+  ⎿  Wrote 40 lines to frontend/src/components/SeatForm.tsx
+       1 import { useAuth } from '../auth/AuthContext';
+       2 import { NameForm } from './NameForm';
+       3
+       4 interface SeatFormProps {
+       5   submitLabel: string;
+       6   busy?: boolean;
+       7   /** Forwarded to NameForm for guests. */
+       8   prefill?: boolean;
+       9   onSubmit(name: string): void;
+      10 }
+     … +35 lines (ctrl+o to expand)
+
+⏺ Wiring it into the composition root, top bar, pages, and styles:
+
+⏺ Bash(python3 - <<'EOF'
+      def edit(p, pairs):…)
+  ⎿  Updated frontend/src/App.tsx (+4 -1)
+      1  import { Link, Route, Routes, useLocation, useNavigate } from 'r
+         eact-router-dom';
+      2  import { useLeave } from './components/LeaveGuard';
+      3 +import { AccountMenu } from './components/AccountMenu';         
+      4  import { HomePage } from './pages/HomePage';
+      5  import { GamePage } from './pages/GamePage';
+      6  import { ReviewPage } from './pages/ReviewPage';
+     ...
+      39            </Link>
+      40            <span className="tagline">Play a friend, then see whe
+          re the game turned.</span>
+      41          </div>
+      41 -        <div className="topbar-side" />                        
+      42 +        <div className="topbar-side">                          
+      43 +          <AccountMenu />                                      
+      44 +        </div>                                                 
+      45        </header>
+      46        <main>
+      47          <Routes>
+  ⎿  Updated frontend/src/components/PlayersCard.tsx (+1 -0)
+      17              <span className={`disc disc-${p} mini`} />
+      18              <span className="player-name">
+      19                {info ? info.name : <span className="muted">Waiti
+          ng for player…</span>}
+      20 +              {info && !info.accountId && <span className="gues
+         +t-tag">guest</span>}                                           
+      21                {you === p && <span className="you-tag">you</span
+          >}
+      22              </span>
+      23              <span className="player-count">{game.counts[p]}</sp
+          an>
+  ⎿  Updated frontend/src/main.tsx (+16 -9)
+       9  import { MockDevBar } from './mocks/MockDevBar';
+      10  import { ToastProvider } from './components/Toasts';
+      11  import { LeaveGuardProvider } from './components/LeaveGuard';
+      12 +import { AuthProvider } from './auth/AuthContext';             
+      13 +import { supabase } from './auth/supabase';                    
+      14  import './styles.css';
+      15  
+      16  // Composition root: the only place that chooses a GameClient i
+          mplementation.
+     ...
+      29  }
+      30  
+      31  const mock: MockClient | null = mockMode() ? createMockClient()
+           : null;
+      30 -const client: GameClient = mock ?? createHttpClient();         
+      32 +// Accounts are real-backend only; mock mode stays guest-only. 
+      33 +const auth = mock ? null : supabase;                           
+      34 +const client: GameClient =                                     
+      35 +  mock ?? createHttpClient(async () => (await auth?.auth.getSes
+         +sion())?.data.session?.access_token);                          
+      36  
+      37  createRoot(document.getElementById('root')!).render(
+      38    <StrictMode>
+      39      <GameClientProvider client={client}>
+      35 -      <ToastProvider>                                          
+      36 -        <LeaveGuardProvider>                                   
+      37 -          <BrowserRouter>                                      
+      38 -            <App />                                            
+      39 -            {mock && <MockDevBar client={mock} />}             
+      40 -          </BrowserRouter>                                     
+      41 -        </LeaveGuardProvider>                                  
+      42 -      </ToastProvider>                                         
+      40 +      <AuthProvider supabase={auth}>                           
+      41 +        <ToastProvider>                                        
+      42 +          <LeaveGuardProvider>                                 
+      43 +            <BrowserRouter>                                    
+      44 +              <App />                                          
+      45 +              {mock && <MockDevBar client={mock} />}           
+      46 +            </BrowserRouter>                                   
+      47 +          </LeaveGuardProvider>                                
+      48 +        </ToastProvider>                                       
+      49 +      </AuthProvider>                                          
+      50      </GameClientProvider>
+      51    </StrictMode>,
+     … 1 more lines (ctrl+o to expand)
+  ⎿  Updated frontend/src/pages/GamePage.tsx (+2 -2)
+       6  import { useLiveGame } from '../data/useLiveGame';
+       7  import { Board } from '../components/Board';
+       8  import { MoveList } from '../components/MoveList';
+       9 -import { NameForm } from '../components/NameForm';             
+       9 +import { SeatForm } from '../components/SeatForm';             
+      10  import { PlayersCard } from '../components/PlayersCard';
+      11  import { AnalysisBar } from '../components/AnalysisBar';
+      12  import { useToasts } from '../components/Toasts';
+     ...
+      120                <p className="muted small">
+      121                  {state.players.B.name} is waiting. You'll play
+            White.
+      122                </p>
+      123 -              <NameForm label="Your name" submitLabel="Join as
+          - White" busy={joining} prefill={false} onSubmit={join} />     
+      123 +              <SeatForm submitLabel="Join as White" busy={join
+          +ing} prefill={false} onSubmit={join} />                       
+      124              </>
+      125            )}
+      126  
+  ⎿  Updated frontend/src/pages/HomePage.tsx (+26 -7)
+       4  import { useGameClient } from '../data/ClientContext';
+       5  import { setSeatToken } from '../data/seatStorage';
+       6  import { useToasts } from '../components/Toasts';
+       7 -import { NameForm } from '../components/NameForm';             
+       7 +import { SeatForm } from '../components/SeatForm';             
+       8 +import { useAuth } from '../auth/AuthContext';                 
+       9  import { errorText, fmtDate, resultText } from '../format';
+      10  
+      11  export function HomePage() {
+      12    const client = useGameClient();
+      13    const toasts = useToasts();
+      14    const navigate = useNavigate();
+      15 +  const { account } = useAuth();                               
+      16    const [busy, setBusy] = useState(false);
+      17 +  const [tab, setTab] = useState<'all' | 'mine'>('all');       
+      18    const [recent, setRecent] = useState<GameSummary[] | null>(nu
+          ll);
+      19    const [recentError, setRecentError] = useState<string | null>
+          (null);
+      20 +  const showing = account ? tab : 'all';                       
+      21  
+      22    useEffect(() => {
+      23      let live = true;
+      20 -    client                                                     
+      21 -      .listFinishedGames(20)                                   
+      24 +    setRecent(null);                                           
+      25 +    setRecentError(null);                                      
+      26 +    (showing === 'mine' ? client.listMyGames(20) : client.listF
+         +inishedGames(20))                                              
+      27        .then((games) => live && setRecent(games))
+      28        .catch((e) => live && setRecentError(errorText(e)));
+      29      return () => {
+      30        live = false;
+      31      };
+      27 -  }, [client]);                                                
+      32 +  }, [client, showing, account?.id]);                          
+      33  
+      34    async function create(name: string) {
+      35      setBusy(true);
+     ...
+      51            Start a game and send the invite link. When it ends, 
+          the engine reviews every move: where the game
+      52            turned, what you should have played, and how accurate
+           each player was.
+      53          </p>
+      49 -        <NameForm label="Your name" submitLabel="Create game" b
+         -usy={busy} onSubmit={create} />                                
+     … 28 more lines (ctrl+o to expand)
+  ⎿  … 1 more file changed
+
+⏺ Typecheck passes. Now the full test suite and a production build:
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie && npm test 2>&1 |
+      grep -E "Tests|passed|failed" | head; npm run typecheck -w backend 2>&1 |
+      tail -2; npm…)
+  ⎿  (No output)
+
+⏺ All 35 tests pass, and both workspaces typecheck and build. Last step: record
+  the contract changes and log this session's prompt, following the pattern of
+  your earlier sessions.
+
+⏺ Bash(cat >> docs/contract-deviations.md <<'EOF'…)
+  ⎿  Created docs/ai-usage/03-accounts-session.md (+24 -0)
+       1 +# Session 2: optional accounts via Supabase                    
+       2 +                                                               
+       3 +## Prompt (verbatim)                                           
+       4 +                                                               
+       5 +```text                                                        
+       6 +looking over and reviewing what has been done for this repo... 
+         +basic frontend and backend implementation are done along with b
+         +asic end game analyzation. Now, I want to look at scalablity an
+         +d tournamenet creation/joining.                                
+       7 +                                                               
+       8 +I have attached the requirements pdf for reference.            
+       9 +                                                               
+      10 +The first thing I want to do is user account creation.... It is
+         + not mandtory that users are created, they can continue as gues
+         +ts, but in order to scale at a tournament level I believe that 
+         +users will have to create their own accounts and therefore I wa
+         +nt to integrate Supabase...                                    
+      11 +```                                                            
+      12 +                                                               
+      13 +## What was built                                              
+      14 +                                                               
+      15 +- Supabase Auth handles identity only. The API verifies access 
+         +tokens locally (JWKS, via `jose`). Accounts and games stay in o
+         +ur own Postgres, so the zero-config `npm start` still works gue
+         +st-only.                                                       
+      16 +- Accounts are linked to seats through nullable `games.black_ac
+         +count_id`/`white_account_id`. Seat tokens remain the move crede
+         +ntial, so the socket layer is unchanged.                       
+      17 +- Frontend: `AuthProvider` (session from Supabase, account from
+         + our API), a top-bar account menu, sign-in/sign-up and username
+         + dialogs, "Playing as @username" on the create/join forms, a gu
+         +est tag on player rows, and a "Yours" tab of the signed-in play
+         +er's finished games.                                           
+      18 +- Judgment calls are logged as A1–A7 in `docs/contract-deviatio
+         +ns.md`. The main one: a signed-in player's seat name is always 
+         +their username, and the server enforces this.                  
+      19 +                                                               
+      20 +## Verification                                                
+      21 +                                                               
+      22 +- Signed HS256 tokens locally against the real API. Checked no/
+         +garbage/expired token → 401; claiming a username; a case-insens
+         +itive duplicate → 409; creating a game as an account (body `nam
+         +e` ignored); a signed-in user without a username joining as a g
+         +uest; guest create unchanged.                                  
+      23 +- The existing socket smoke test passes. The 35 engine tests pa
+         +ss. Both workspaces typecheck, and the frontend builds.        
+      24 +- Not yet verified: the browser flow against a real Supabase pr
+         +oject (keys weren't configured at the time).                   
+  ⎿  Updated docs/contract-deviations.md (+14 -0)
+       84  - The smoke game has 25 best and 11 blunders out of 64 plies.
+       85  - Accuracy lands at 50–70% for random or first-legal-move play
+           .
+       86  - Neither "everything is a blunder" nor "nothing is" occurs.
+       87 +                                                              
+       88 +## Session 2: optional accounts (Supabase Auth)               
+       89 +                                                              
+       90 +The contract cut accounts (§7.2) and planned them for Mileston
+          +e 2 (§7.1). They were pulled forward because cross-game coachi
+          +ng and tournaments both need a stable identity. Guest play is 
+          +unchanged.                                                    
+       91 +                                                              
+       92 +| # | Area | What the contract says | What was built | Why |  
+       93 +|---|---|---|---|---|                                         
+       94 +| A1 | Identity | Anonymous seat tokens only (§0b) | Seat toke
+          +ns are **still** the in-game credential for everyone. Accounts
+          + are optional: Supabase Auth issues the session, and the API v
+          +erifies its JWT locally via JWKS (`jose`). Legacy HS256 projec
+          +ts are supported via `SUPABASE_JWT_SECRET`. | Guests and accou
+          +nt holders share one game flow, and the socket layer is untouc
+          +hed. Local verification means no per-request call to Supabase.
+          + |                                                            
+       95 +| A2 | Schema | §7.1 planned `players` + `*_player_id` **repla
+          +cing** `*_token_hash` | `002_accounts.sql`: an `accounts` tabl
+          +e (id = Supabase user id, unique case-insensitive `username`),
+          + plus nullable `black_account_id`/`white_account_id` **alongsi
+          +de** the token hashes | Named `accounts` because `Player` alre
+          +ady means `'B' \| 'W'`. The token hashes stay because guests s
+          +till exist. Old games read as guest seats. |                  
+       96 +| A3 | Where auth data lives | — | Only identity lives in Supa
+          +base. The `accounts` row and all game data stay in our Postgre
+          +s. | `npm start` still works with zero keys (guest-only mode),
+          + and the backend stays the single authority. In production, `D
+          +ATABASE_URL` can point at Supabase's Postgres. |              
+       97 +| A4 | `types.ts` | Frozen | Added `PlayerInfo.accountId`, `Ac
+          +count`, `MeResponse`, `ClaimUsernameRequest`, and `ErrorCode` 
+          +values `UNAUTHORIZED` (401) and `USERNAME_TAKEN` (409) | These
+          + are additive changes. The mock fixtures were updated to match
+          +. |                                                           
+       98 +| A5 | Seat name | Free-text `name` on create/join | For a sig
+          +ned-in caller with a username, the server uses the username an
+          +d **ignores** the body's `name`. Guests are unchanged. | Stops
+          + anyone posing as a registered player. That matters once resul
+          +ts feed profiles and tournaments. |                           
+       99 +| A6 | Bad bearer token | — | A present-but-invalid `Authoriza
+          +tion` header → 401 `UNAUTHORIZED`. It never silently downgrade
+          +s to a guest. | Otherwise a game could silently fail to reach 
+          +the player's profile. |                                       
+      100 +| A7 | New endpoints | — | `GET /api/me`, `PUT /api/me` `{user
+          +name}`, `GET /api/me/games?limit=` (finished games where the a
+          +ccount holds either seat) | `me/games` is the first cross-game
+          + query and the seed for Milestone 2 coaching. |               
+⏺ Accounts are in and optional. Guests play exactly as before. I tested the
+  backend against a local Postgres, but the sign-up and sign-in flow in the
+  browser hasn't been run against a real Supabase project yet, because there are
+  no Supabase keys in your .env. Nothing is committed; I left that to you, as
+  in your earlier sessions.
+
+  How it works
+  - Supabase only handles sign-in. Usernames and all game data stay in your own
+    Postgres. With no keys set, npm start runs guest-only, so reviewers can
+    still run it with no setup. When you host it, DATABASE_URL can point at
+    Supabase's Postgres.
+  - The backend checks the login token itself, using Supabase's published public
+    keys (via jose), so it doesn't call Supabase on every request.
+  - Games are linked to accounts through new optional black_account_id /
+    white_account_id columns (002_accounts.sql
+    (backend/migrations/002_accounts.sql)). The per-game seat tokens are still
+    what authorizes moves, so guests and signed-in players go through the same
+    game flow and the socket code didn't change.
+  - Signed-in players always play under their username. The server ignores any
+    name typed in the request, so nobody can pose as a registered player. That
+    matters once results count toward profiles and tournaments.
+  - New endpoints: GET/PUT /api/me to read and claim a username, and GET
+    /api/me/games for your finished games.
+  - Frontend: a Sign in button in the top bar with sign-in/sign-up and
+    username-picker dialogs, "Playing as @username" on the create and join
+    forms, a guest tag on player rows, and an All / Yours tab on the home page's
+    game list.
+
+  What I checked
+  - Against the real API with locally signed tokens: missing, bad and expired
+    tokens are rejected (401); a username already taken in a different case is
+    rejected (409); creating a game as an account ignores the typed name; guest
+    play is unchanged.
+  - The existing smoke test passes, all 35 engine tests pass, and both
+    workspaces typecheck and build.
+  - I also caught and fixed a bug in my first version of the auth context: when
+    no one was signed in, the page would have stayed on "loading" forever.
+
+  Your steps to turn it on
+  1. Create a Supabase project. Under Project Settings → API, copy the project
+     URL and the publishable key.
+  2. Add them to your root .env (one file now configures both the backend and
+     the frontend; see .env.example):
+  VITE_SUPABASE_URL=https://<ref>.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+  3. For local testing, you can turn off "Confirm email" under Authentication →
+     Providers → Email so sign-up works immediately. With it on, the app shows a
+     "Check your email" step.
+  4. Run npm start, sign up in one window and play a guest in another.
+
+  Docs: I logged the changes against the design contract as entries A1–A7 in
+  contract-deviations.md (docs/contract-deviations.md), and saved your prompt
+  with a summary in 03-accounts-session.md
+  (docs/ai-usage/03-accounts-session.md).
+
+  Positioning: your design contract listed accounts as table stakes where
+  eothello already wins. In your write-up, justify them by what they unlock for
+  the coaching edge: coaching that spans many games (accuracy trends, recurring
+  mistakes, which /me/games starts) and tournament identity.
+
+  Next: tournaments can build on this directly: tournaments,
+  tournament_entries(account_id) and pairings(game_id) tables, with creating or
+  joining a tournament requiring an account. One gap to note in the roadmap: an
+  account can't yet get back into an in-progress game from another device,
+  because the seat token lives only in that browser tab.
+
+❯ Both the keys are now in my .env... I believe I need to connect to supabase
+  in order to push the migrations and backend correct?
+
+⏺ Short answer: no. Let me check that your keys work before explaining.
+
+⏺ Bash(grep -oE '^[A-Z_a-z]+ *=' .env | tr -d ' =' ; set -a; . ./.env
+      2>/dev/null; set +a; echo "---"; curl -s
+      "$VITE_SUPABASE_URL/auth/v1/.well-known/jwks.json" | pyt…)
+  ⎿  (No output)
+
+⏺ Your keys are set up correctly, and you don't need to connect to Supabase or
+  push anything to it.
+
+  With the design we chose, Supabase only handles sign-in. Everything else stays
+  where it was:
+
+  - Migrations run automatically against your local Docker Postgres on npm
+    start. 002_accounts.sql has already been applied there.
+  - The backend only needs your Supabase URL, which it already reads from
+    VITE_SUPABASE_URL. It uses it to fetch Supabase's public signing keys and
+    check login tokens.
+  - No Supabase CLI and no supabase db push, because none of our tables live in
+    Supabase.
+
+  I checked your project from here:
+  - Signing keys: your project publishes an ES256 key, which is the modern
+    setup. You don't need SUPABASE_JWT_SECRET.
+  - Your two keys: the URL and publishable key work, and email/password sign-in
+    is enabled.
+  - Email confirmation is on: new sign-ups must click an emailed link before
+    they can sign in.
+
+  Two dashboard settings to change before testing:
+  1. Authentication → URL Configuration: set Site URL to http://localhost:5173,
+     and add it (plus your ngrok URL if you use one) to Redirect URLs. Otherwise
+     the confirmation link goes to Supabase's default of localhost:3000.
+  2. Optional, for faster local testing: turn off "Confirm email" under
+     Authentication → Providers → Email so sign-up logs you straight in.
+
+  Then restart npm start; Vite only reads .env on startup.
+
+  When Supabase's database does matter: only if you decide to host the database
+  on Supabase, for your Vercel/Railway step. Then you set DATABASE_URL to
+  Supabase's connection string, and our own migration runner creates the tables
+  on first boot. The dbpass in your .env is presumably that database password.
+  Use the Session pooler string (port 5432), not the Transaction pooler (6543):
+  our migration runner uses a lock and transactions that need a session
+  connection. I'd leave this until you deploy.
+
+❯ kill the job running on port 5173 so I restart and test locally
+
+⏺ Bash(lsof -iTCP:5173 -sTCP:LISTEN -n -P; lsof -tiTCP:5173 -sTCP:LISTEN | xargs
+      -r kill; sleep 1; lsof -iTCP:5173 -sTCP:LISTEN -n -P || echo "5173 free";
+      lsof -iTCP:3…)
+  ⎿  Error: Exit code 1
+     COMMAND   PID         USER   FD   TYPE             DEVICE SIZE/OFF NODE
+     NAME
+     node    32225 mitchelrifae   13u  IPv6 0xda4367dba73c2ebd      0t0  TCP
+     *:5173 (LISTEN)
+     5173 free
+
+⏺ I stopped the Vite dev server that was listening on 5173 (PID 32225), and the
+  port is now free. Nothing was running on 3001, so you're starting clean.
+
+  Run npm start from the repo root; it starts both the API and the web app and
+  picks up the new .env.
+
+❯ Great everything seems to be working... now I want to make the recent games
+  only show this user's recent games and if they are not signed in, then in the
+  section just show "Sign in to save recent games" or something similar
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ I'll tie the panel to the sign-in state, but keep the global list visible when
+  accounts are fully disabled (no Supabase keys or ?mock=1) so reviewers with
+  no setup can still see games.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/frontend && python3
+      - <<'EOF'
+      def edit(p, pairs):…)
+  ⎿  Updated frontend/src/components/AccountMenu.tsx (+1 -1)
+      88    );
+      89  }
+      90  
+      91 -function SignInDialog({ onClose }: { onClose(): void }) {      
+      91 +export function SignInDialog({ onClose }: { onClose(): void }) 
+         +{                                                              
+      92    const auth = useAuth();
+      93    const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn
+          ');
+      94    const [email, setEmail] = useState('');
+  ⎿  Updated frontend/src/pages/HomePage.tsx (+24 -21)
+       5  import { setSeatToken } from '../data/seatStorage';
+       6  import { useToasts } from '../components/Toasts';
+       7  import { SeatForm } from '../components/SeatForm';
+       8 +import { SignInDialog } from '../components/AccountMenu';      
+       9  import { useAuth } from '../auth/AuthContext';
+      10  import { errorText, fmtDate, resultText } from '../format';
+      11  
+     ...
+      13    const client = useGameClient();
+      14    const toasts = useToasts();
+      15    const navigate = useNavigate();
+      15 -  const { account } = useAuth();                               
+      16 +  const { state: auth, account } = useAuth();                  
+      17    const [busy, setBusy] = useState(false);
+      17 -  const [tab, setTab] = useState<'all' | 'mine'>('all');       
+      18 +  const [signingIn, setSigningIn] = useState(false);           
+      19    const [recent, setRecent] = useState<GameSummary[] | null>(nu
+          ll);
+      20    const [recentError, setRecentError] = useState<string | null>
+          (null);
+      20 -  const showing = account ? tab : 'all';                       
+      21 +  // Signed in: your games. Accounts not configured at all (zer
+         +o-config run, mock mode): every                                
+      22 +  // recent game, so the panel isn't empty. Any other state sho
+         +ws a prompt instead of a list.                                 
+      23 +  const source = account ? 'mine' : auth.status === 'disabled' 
+         +? 'all' : null;                                                
+      24  
+      25    useEffect(() => {
+      23 -    let live = true;                                           
+      26      setRecent(null);
+      27      setRecentError(null);
+      26 -    (showing === 'mine' ? client.listMyGames(20) : client.listF
+         -inishedGames(20))                                              
+      28 +    if (!source) return;                                       
+      29 +    let live = true;                                           
+      30 +    (source === 'mine' ? client.listMyGames(20) : client.listFi
+         +nishedGames(20))                                               
+      31        .then((games) => live && setRecent(games))
+      32        .catch((e) => live && setRecentError(errorText(e)));
+      33      return () => {
+      34        live = false;
+      35      };
+      32 -  }, [client, showing, account?.id]);                          
+      36 +  }, [client, source, account?.id]);                           
+      37  
+      38    async function create(name: string) {
+      39      setBusy(true);
+     … 37 more lines (ctrl+o to expand)
+  ⎿  Updated frontend/src/styles.css (+1 -4)
+      328  .seat-as { margin: 0; flex: 1 1 200px; align-self: center; }
+      329  .stack-form { display: flex; flex-direction: column; gap: 12px
+           ; margin-top: 12px; }
+      330  .stack-form label { display: flex; flex-direction: column; gap
+           : 4px; font-size: 0.85rem; color: var(--ink-2); }
+      331 -.recent-head { display: flex; align-items: baseline; justify-c
+          -ontent: space-between; gap: 12px; }                           
+      332 -.tabs { display: inline-flex; border: 1px solid var(--line); b
+          -order-radius: 8px; overflow: hidden; }                        
+      333 -.tabs button { font: inherit; font-size: 0.85rem; padding: 3px
+          - 10px; border: 0; background: transparent; color: var(--ink-2)
+          -; cursor: pointer; }                                          
+      334 -.tabs button[aria-selected='true'] { background: var(--accent)
+          -; color: var(--accent-ink); }                                 
+      331 +.recent-prompt { display: flex; flex-direction: column; align-
+          +items: flex-start; gap: 4px; }                                
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie && git diff --stat
+      && grep -n "function SignInDialog"
+      frontend/src/components/AccountMenu.tsx)
+  ⎿  (No output)
+
+⏺ The home page's game panel now shows only the signed-in player's games. Guests
+  see a prompt instead. It typechecks, but I haven't looked at it in a browser.
+  Vite should hot-reload it into your running app, so just refresh.
+
+  What the panel shows depends on the visitor:
+
+  ┌──────────────────────┬──────────────────────────────────────────────────┐
+  │       Visitor        │                      Panel                       │
+  ├──────────────────────┼──────────────────────────────────────────────────┤
+  │                      │ Your recent games: only your finished games. If  │
+  │ Signed in            │ there are none: "Finish a game and it shows up   │
+  │                      │ here with its review."                           │
+  ├──────────────────────┼──────────────────────────────────────────────────┤
+  │                      │ "Sign in to save your games and come back to     │
+  │ Guest                │ their reviews any time." plus a Sign in button   │
+  │                      │ that opens the same dialog as the top bar        │
+  ├──────────────────────┼──────────────────────────────────────────────────┤
+  │ Signed in, no        │ "Pick a username to start saving your games."    │
+  │ username yet         │                                                  │
+  ├──────────────────────┼──────────────────────────────────────────────────┤
+  │ Accounts not set up  │                                                  │
+  │ (no Supabase keys,   │ The old global recent-games list                 │
+  │ or ?mock=1)          │                                                  │
+  └──────────────────────┴──────────────────────────────────────────────────┘
+
+  I kept the last row on purpose: a reviewer running npm start without Supabase
+  keys would otherwise see a Sign in button that can't work.
+
+  I also removed the All/Yours tabs from the last change, since they're
+  redundant now. The main change is in HomePage.tsx
+  (frontend/src/pages/HomePage.tsx), plus a one-word change in AccountMenu.tsx
+  (frontend/src/components/AccountMenu.tsx) so the sign-in dialog can be reused.
+
+  Games you played as a guest before signing in won't appear in your list,
+  because they aren't linked to your account. Linking a finished guest game
+  afterwards could go on the roadmap if you think it matters.
+
+❯ Great, now by the end of my working session today, I want to host this on
+  Vercel and have Supabase be the database behind everything. What would need
+  to change, if anything, for that to happen?
+
+⏺ I'll check a couple of things in the code before answering, since they decide
+  what breaks.
+
+⏺ Bash(node -e "console.log('pg', require('pg/package.json').version, '|
+      pg-connection-string',
+      require('pg-connection-string/package.json').version)"; grep -n "sslmod…)
+  ⎿  (No output)
+
+⏺ The frontend can go on Vercel as is, but the backend can't. It needs a
+  long-running host like Railway, with Supabase as the database. You mentioned
+  Vercel/Railway earlier, and that split is the one I'd recommend.
+
+  Why the backend can't run on Vercel
+
+  Vercel runs short-lived serverless functions. Three parts of the backend
+  assume one process that stays up:
+  - Socket.IO keeps an open connection to every player. Vercel functions can't
+    hold those.
+  - GameService keeps live games and the per-game lock (which makes each game's
+    moves apply one at a time) in memory. That breaks if every request can land
+    on a fresh function.
+  - AnalysisRunner analyzes games in the background after the response is sent.
+    Vercel freezes a function once it responds.
+
+  Making the backend serverless would mean switching to a hosted realtime
+  service, moving the game locks into the database, and adding a job queue.
+  That's the Milestone 3 scaling work in your contract, not something for today.
+
+  The setup
+
+  ┌─────────────────────┬─────────────────────┬─────────────────────────────┐
+  │        Piece        │        Host         │           Changes           │
+  ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+  │ React app           │ Vercel              │ Small                       │
+  ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+  │ API + sockets +     │ Railway (or         │ Small                       │
+  │ analysis            │ Render/Fly)         │                             │
+  ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+  │ Postgres            │ Supabase            │ One migration you need for  │
+  │                     │                     │ security                    │
+  ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+  │ Sign-in             │ Supabase            │ Dashboard settings only     │
+  └─────────────────────┴─────────────────────┴─────────────────────────────┘
+
+  What needs to change
+
+  1. Security (required): lock down the tables in Supabase. Supabase
+  automatically exposes every table in the public schema through its REST API,
+  and the key that API accepts is the publishable key your frontend ships to
+  every browser. Our migrations create games, moves and accounts there. Without
+  row-level security (RLS), anyone could read the seat-token hashes or rewrite
+  game results from the browser console. The fix is a 003_enable_rls.sql that
+  turns on RLS with no policies. Our backend connects as the database owner,
+  which isn't affected by RLS, so the app keeps working. It changes nothing
+  locally either.
+
+  2. Database connection (backend).
+  - Set DATABASE_URL to Supabase's Session pooler string. Supabase's direct
+    connection is IPv6-only, and the Transaction pooler breaks our migration
+    lock.
+  - TLS: I checked the installed pg version. It treats sslmode=require as full
+    certificate verification, and Supabase's certificate is signed by Supabase's
+    own certificate authority. Connections would fail with a "self-signed
+    certificate" error. The fix is a few lines in pool.ts
+    (backend/src/db/pool.ts) to load Supabase's CA certificate (downloadable
+    from the dashboard) from an environment variable. Turning verification off
+    would also work, but it isn't safe.
+  - The migrations need no changes; they run themselves when the server boots.
+
+  3. Frontend → backend URL. The frontend calls /api and /socket.io at its own
+  origin, and that only works because the Vite dev server forwards those calls
+  to the API. In production:
+  - Add a VITE_API_URL setting and use it in httpClient.ts
+    (frontend/src/data/httpClient.ts) for both the REST calls and the socket
+    connection. It stays empty locally, so the Vite forwarding keeps working.
+  - Vercel's URL rewrites can't forward the socket connection, so the socket has
+    to talk to Railway directly.
+
+  4. CORS (backend). Once the frontend and API are on different domains, the API
+  has to allow the frontend's origin. That means an Express CORS middleware
+  plus Socket.IO's cors option, driven by a WEB_ORIGIN setting.
+
+  5. Vercel config. A frontend/vercel.json that serves index.html for every
+  path, so links like /game/:id still work on a refresh. Set Vercel's Root
+  Directory to frontend; the shared workspace should resolve from the monorepo
+  root.
+
+  6. Railway config.
+  - Start command npm run start -w backend, health check /api/health.
+  - Move tsx from dev dependencies to dependencies, because the backend runs
+    through it in production.
+  - Run exactly one instance. The in-memory game cache breaks with two.
+
+  7. Supabase Auth dashboard. Add the Vercel URL to Site URL and Redirect URLs.
+
+  Settings per host
+
+  - Vercel: VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, VITE_API_URL
+  - Railway: DATABASE_URL, DATABASE_CA_CERT, SUPABASE_URL, WEB_ORIGIN
+
+  The code changes (1–6) are about 30–45 minutes, all small and each testable
+  locally. The rest is clicking through dashboards. I'd do the RLS migration
+  first either way, since it closes a real hole the moment the tables exist in
+  Supabase.
+
+  Want me to make the code changes now? I'd leave the Railway and Vercel
+  projects for you to create.
+
+❯ yes make those changes now and leave the vercel integration for later. I do
+  not think I will need railway, since supabase will be my postgresSQL
+
+⏺ I'll make the code changes now, but first a correction that affects your plan:
+  Supabase replaces the database, not the Node backend. The API server
+  (sockets, live games, analysis) still has to run somewhere. More on that at
+  the end. None of today's changes depend on where it runs.
+
+  Let me check how pg combines an explicit ssl option with the connection
+  string, since that decides how the certificate fix has to be written.
+
+⏺ Bash(grep -n "connectionString\|parse("
+      node_modules/pg/lib/connection-parameters.js | head; node -e "
+      const {parse}=require('pg-connection-string');…)
+  ⎿  (No output)
+
+⏺ Confirmed that a URL's sslmode silently overrides any ssl option set in code,
+  so pool.ts needs to strip SSL settings from the URL when we supply the
+  certificate. Making the backend changes now.
+
+⏺ Bash(cat > backend/migrations/003_enable_rls.sql <<'EOF'
+      -- On Supabase, every table in `public` is exposed through its Data API to
+      anyone holding the…)
+  ⎿  Created backend/migrations/003_enable_rls.sql (+8 -0)
+      1 +-- On Supabase, every table in `public` is exposed through its D
+        +ata API to anyone holding the                                   
+      2 +-- publishable key, which ships to every browser. All access her
+        +e goes through our API, which                                   
+      3 +-- connects as the tables' owner (row-level security doesn't app
+        +ly to owners). So: RLS on,                                      
+      4 +-- no policies. The Data API sees nothing; the app is unaffected
+        +. Harmless on plain Postgres.                                   
+      5 +ALTER TABLE games             ENABLE ROW LEVEL SECURITY;        
+      6 +ALTER TABLE moves             ENABLE ROW LEVEL SECURITY;        
+      7 +ALTER TABLE accounts          ENABLE ROW LEVEL SECURITY;        
+      8 +ALTER TABLE schema_migrations ENABLE ROW LEVEL SECURITY;        
+  ⎿  Updated backend/src/config.ts (+11 -0)
+      10  
+      11  export const PORT = Number(process.env.PORT ?? 3001);
+      12  export const DATABASE_URL = process.env.DATABASE_URL ?? 'postgr
+          es://othello:othello@localhost:5433/othello';
+      13 +/** CA certificate (PEM, or a path to one) for TLS to hosted Po
+         +stgres. Unset for local Docker. */                             
+      14 +export const DATABASE_CA_CERT = process.env.DATABASE_CA_CERT ??
+         + '';                                                           
+      15 +                                                               
+      16 +/**                                                            
+      17 + * Browser origins allowed to call the API cross-origin (comma-
+         +separated), e.g. the deployed web app.                         
+      18 + * Unset locally: the Vite dev server proxies /api and /socket.
+         +io, so everything is same-origin.                              
+      19 + */                                                            
+      20 +export const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? '')      
+      21 +  .split(',')                                                  
+      22 +  .map((o) => o.trim().replace(/\/+$/, ''))                    
+      23 +  .filter(Boolean);                                            
+      24  
+      25  /**
+      26   * Supabase Auth. Unset = accounts disabled and everyone plays 
+          as a guest.
+  ⎿  Updated backend/src/db/pool.ts (+25 -2)
+       1 +import { readFileSync } from 'node:fs';                        
+       2  import pg from 'pg';
+       2 -import { DATABASE_URL } from '../config';                      
+       3 +import { DATABASE_CA_CERT, DATABASE_URL } from '../config';    
+       4  
+       4 -export const pool = new pg.Pool({ connectionString: DATABASE_UR
+         -L, max: 10 });                                                 
+       5 +/**                                                            
+       6 + * TLS for hosted Postgres (Supabase). With a CA the server cer
+         +tificate is fully verified.                                    
+       7 + * `DATABASE_CA_CERT` is the PEM itself (literal `\n`s allowed,
+         + for single-line env vars) or a path to it.                    
+       8 + * Local Docker Postgres: unset, plain connection.             
+       9 + */                                                            
+      10 +function sslConfig(): pg.PoolConfig['ssl'] {                   
+      11 +  if (!DATABASE_CA_CERT) return undefined;                     
+      12 +  const ca = DATABASE_CA_CERT.includes('-----BEGIN')           
+      13 +    ? DATABASE_CA_CERT.replace(/\\n/g, '\n')                   
+      14 +    : readFileSync(DATABASE_CA_CERT, 'utf8');                  
+      15 +  return { ca, rejectUnauthorized: true };                     
+      16 +}                                                              
+      17 +                                                               
+      18 +/** SSL params in the URL override the `ssl` option in pg, so d
+         +rop them when we configure TLS ourselves. */                   
+      19 +function connectionString(ssl: pg.PoolConfig['ssl']): string { 
+      20 +  if (!ssl) return DATABASE_URL;                               
+      21 +  const url = new URL(DATABASE_URL);                           
+      22 +  for (const p of ['sslmode', 'sslcert', 'sslkey', 'sslrootcert
+         +', 'uselibpqcompat']) url.searchParams.delete(p);              
+      23 +  return url.toString();                                       
+      24 +}                                                              
+      25 +                                                               
+      26 +const ssl = sslConfig();                                       
+      27 +export const pool = new pg.Pool({ connectionString: connectionS
+         +tring(ssl), ssl, max: 10 });                                   
+      28  
+      29  // An idle client erroring (e.g. Postgres restarted) must not c
+          rash the process.
+      30  pool.on('error', (err) => console.error('[db] idle client error
+          :', err.message));
+  ⎿  Updated backend/src/server.ts (+26 -4)
+      1  import { createServer } from 'node:http';
+      2 -import express from 'express';                                  
+      2 +import express, { type NextFunction, type Request, type Response
+        + } from 'express';                                              
+      3  import { Server } from 'socket.io';
+      4  import type { ClientToServerEvents, ServerToClientEvents } from 
+         '@othello/shared';
+      5 -import { PORT } from './config';                                
+      5 +import { PORT, WEB_ORIGINS } from './config';                   
+      6  import { runMigrations } from './db/migrate';
+      7  import { pool } from './db/pool';
+      8  import { GameService } from './game/GameService';
+     ...
+      10  import { AnalysisRunner } from './analysis/AnalysisRunner';
+      11  import { registerSocketHandlers, roomFor } from './socket/handl
+          ers';
+      12  
+      13 +/**                                                            
+      14 + * CORS for the deployed web app on its own domain. Bearer toke
+         +ns, not cookies, so no credentials.                            
+      15 + * Unlisted origins get no CORS headers, and the browser blocks
+         + them.                                                         
+      16 + */                                                            
+      17 +function allowWebOrigins(req: Request, res: Response, next: Nex
+         +tFunction): void {                                             
+      18 +  const origin = req.headers.origin;                           
+      19 +  if (origin && WEB_ORIGINS.includes(origin)) {                
+      20 +    res.setHeader('Access-Control-Allow-Origin', origin);      
+      21 +    res.setHeader('Vary', 'Origin');                           
+      22 +    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, P
+         +UT, OPTIONS');                                                 
+      23 +    res.setHeader('Access-Control-Allow-Headers', 'Content-Type
+         +, Authorization');                                             
+      24 +    res.setHeader('Access-Control-Max-Age', '600');            
+      25 +  }                                                            
+      26 +  if (req.method === 'OPTIONS') {                              
+      27 +    res.sendStatus(204);                                       
+      28 +    return;                                                    
+      29 +  }                                                            
+      30 +  next();                                                      
+      31 +}                                                              
+      32 +                                                               
+      33  async function main(): Promise<void> {
+      34    // Idempotent; also run by `npm start`, but this makes `npm r
+          un dev -w backend` self-sufficient.
+      35    await runMigrations((m) => console.log(m));
+     ...
+      37    const games = new GameService();
+      38    const app = express();
+      39    const httpServer = createServer(app);
+      20 -  const io = new Server<ClientToServerEvents, ServerToClientEve
+         -nts>(httpServer);                                              
+     … 14 more lines (ctrl+o to expand)
+
+⏺ Backend side done. Next: move tsx into the backend's runtime dependencies, and
+  make the frontend's API base URL configurable.
+
+⏺ Bash(python3 - <<'EOF'
+      import json…)
+  ⎿  Updated .env.example (+10 -0)
+      12  #
+      13  # Only for projects still using the legacy shared JWT secret (n
+          ew projects use JWKS; leave unset):
+      14  # SUPABASE_JWT_SECRET=...
+      15 +                                                               
+      16 +# ---- Deployment only (leave unset locally) ----              
+      17 +# Web app → API origin when they're on different domains (read 
+         +at build time by Vite).                                        
+      18 +# VITE_API_URL=https://api.example.com                         
+      19 +# API: web-app origins allowed to call it cross-origin, comma-s
+         +eparated.                                                      
+      20 +# WEB_ORIGIN=https://your-app.vercel.app                       
+      21 +# API: CA certificate for TLS to hosted Postgres, as PEM (\n es
+         +capes allowed) or a file path.                                 
+      22 +# Supabase: Dashboard → Database settings → SSL Configuration →
+         + Download certificate.                                         
+      23 +# DATABASE_CA_CERT=/path/to/prod-ca-2021.crt                   
+      24 +# Supabase DATABASE_URL: use the Session pooler string (port 54
+         +32), not the Transaction pooler.                               
+  ⎿  Updated backend/package.json (+3 -3)
+      16      "express": "^4.21.2",
+      17      "jose": "^6.2.12",
+      18      "pg": "^8.13.1",
+      19 -    "socket.io": "^4.8.1"                                      
+      19 +    "socket.io": "^4.8.1",                                     
+      20 +    "tsx": "^4.19.2"                                           
+      21    },
+      22    "devDependencies": {
+      23      "@types/express": "^4.17.21",
+      24      "@types/node": "^22.10.2",
+      25      "@types/pg": "^8.11.10",
+      25 -    "socket.io-client": "^4.8.1",                              
+      26 -    "tsx": "^4.19.2"                                           
+      26 +    "socket.io-client": "^4.8.1"                               
+      27    }
+      28  }
+  ⎿  Updated frontend/src/data/httpClient.ts (+9 -4)
+      1  /**
+      2   * The real GameClient: REST over fetch (design-contract §3.1) p
+         lus one Socket.IO
+      3 - * connection (§3.2). All URLs are relative; Vite proxies /api a
+        -nd /socket.io to                                                
+      4 - * the API, so this works unchanged through an ngrok tunnel on 5
+        -173.                                                            
+      3 + * connection (§3.2). Locally URLs are relative: Vite proxies /a
+        +pi and /socket.io to                                            
+      4 + * the API, so this works unchanged through an ngrok tunnel on 5
+        +173. Deployed, the                                              
+      5 + * web app and API live on different domains and VITE_API_URL po
+        +ints at the API.                                                
+      6   */
+      7  import { io, type Socket } from 'socket.io-client';
+      8  import type {
+     ...
+      23  
+      24  const ACK_TIMEOUT_MS = 8000;
+      25  
+      26 +/** API origin, e.g. https://api.example.com. Empty = same orig
+         +in (local dev). */                                             
+      27 +const API_URL = ((import.meta.env.VITE_API_URL as string | unde
+         +fined) ?? '').replace(/\/+$/, '');                             
+      28 +                                                               
+      29  type TypedSocket = Socket<ServerToClientEvents, ClientToServerE
+          vents>;
+      30  
+      31  // ---------- REST ----------
+     ...
+      45      const headers: Record<string, string> = {};
+      46      if (body !== undefined) headers['Content-Type'] = 'applicat
+          ion/json';
+      47      if (token) headers.Authorization = `Bearer ${token}`;
+      44 -    res = await fetch(`/api${path}`, {                         
+      48 +    res = await fetch(`${API_URL}/api${path}`, {               
+      49        method,
+      50        headers,
+      51        body: body === undefined ? undefined : JSON.stringify(bod
+          y),
+     ...
+       98    /** One connection per tab, created on first use. */
+       99    function getSocket(): TypedSocket {
+      100      if (socket) return socket;
+       97 -    const s: TypedSocket = io({ path: '/socket.io' });        
+      101 +    const opts = { path: '/socket.io' };                      
+      102 +    const s: TypedSocket = API_URL ? io(API_URL, opts) : io(op
+          +ts);                                                          
+      103  
+      104      // A reconnect is a fresh server-side socket in no rooms: 
+           re-join every game we
+      105      // are watching and hand the fresh state to its handlers.
+  ⎿  Updated package-lock.json (+3 -32)
+      28          "express": "^4.21.2",
+      29          "jose": "^6.2.12",
+      30          "pg": "^8.13.1",
+      31 -        "socket.io": "^4.8.1"                                  
+      31 +        "socket.io": "^4.8.1",                                 
+      32 +        "tsx": "^4.19.2"                                       
+      33        },
+      34        "devDependencies": {
+      35          "@types/express": "^4.17.21",
+      36          "@types/node": "^22.10.2",
+      37          "@types/pg": "^8.11.10",
+      37 -        "socket.io-client": "^4.8.1",                          
+      38 -        "tsx": "^4.19.2"                                       
+      38 +        "socket.io-client": "^4.8.1"                           
+      39        }
+      40      },
+      41      "frontend": {
+     ...
+      172        "cpu": [
+      173          "ppc64"
+      174        ],
+      175 -      "dev": true,                                            
+      175        "license": "MIT",
+      176        "optional": true,
+      177        "os": [
+     ...
+      188        "cpu": [
+      189          "arm"
+      190        ],
+      192 -      "dev": true,                                            
+      191        "license": "MIT",
+      192        "optional": true,
+      193        "os": [
+     ...
+      204        "cpu": [
+      205          "arm64"
+      206        ],
+      209 -      "dev": true,                                            
+      207        "license": "MIT",
+      208        "optional": true,
+      209        "os": [
+     ...
+      220        "cpu": [
+      221          "x64"
+     … 180 more lines (ctrl+o to expand)
+
+⏺ Both typecheck. Now I'll test on a separate port: migration 003, CORS for
+  allowed vs. unknown origins, and the smoke test.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/backend &&
+      SP=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/994afb70-8f48-4d9…)
+  ⎿  (No output)
+  ⎿  (timeout 3m)
+
+⏺ RLS is enabled across all four tables, CORS correctly restricts to the allowed
+  origin, and the smoke test still passes with RLS on, confirming the owner
+  bypass works. Now checking that URL parsing correctly handles a Supabase-style
+  connection string, including passwords with special characters.
+
+⏺ Bash(node -e "const u=new URL('postgresql://postgres.abcd:p%40ss%2Fw0rd@aws-0-
+      us-east-1.pooler.supabase.com:5432/postgres?sslmode=require');
+      u.searchParams.delete('s…)
+  ⎿  (No output)
+
+⏺ Logging these like the account changes:
+⏺ Bash(cat >> docs/contract-deviations.md <<'EOF'…)
+  ⎿  Updated docs/ai-usage/03-accounts-session.md (+15 -0)
+      22  - Signed HS256 tokens locally against the real API. Checked no/
+          garbage/expired token → 401; claiming a username; a case-insens
+          itive duplicate → 409; creating a game as an account (body `nam
+          e` ignored); a signed-in user without a username joining as a g
+          uest; guest create unchanged.
+      23  - The existing socket smoke test passes. The 35 engine tests pa
+          ss. Both workspaces typecheck, and the frontend builds.
+      24  - Not yet verified: the browser flow against a real Supabase pr
+          oject (keys weren't configured at the time).
+      25 +                                                               
+      26 +## Follow-up prompts (verbatim)                                
+      27 +                                                               
+      28 +```text                                                        
+      29 +Great everything seems to be working... now I want to make the 
+         +recent games only show this user's recent games and if they are
+         + not signed in, then in the section just show "Sign in to save 
+         +recent games" or something similar                             
+      30 +```                                                            
+      31 +The home panel lists only the signed-in account's games (`/api/
+         +me/games`). Guests see a sign-in prompt. With accounts not conf
+         +igured (zero-config / mock mode), it keeps the global list so t
+         +he panel isn't empty.                                          
+      32 +                                                               
+      33 +```text                                                        
+      34 +Great, now by the end of my working session today, I want to ho
+         +st this on Vercel and have Supabase be the database behind ever
+         +ything. What would need to change, if anything, for that to hap
+         +pen?                                                           
+      35 +```                                                            
+      36 +```text                                                        
+      37 +yes make those changes now and leave the vercel integration for
+         + later. I do not think I will need railway, since supabase will
+         + be my postgresSQL                                             
+      38 +```                                                            
+      39 +Explained that Vercel can't host the backend: sockets, the in-m
+         +emory game lock and background analysis all need a long-running
+         + process. Supabase replaces the database, not the API server. B
+         +uilt entries D1–D4 in `contract-deviations.md`: an RLS migratio
+         +n, verified TLS, `VITE_API_URL` + `WEB_ORIGIN` CORS, and `tsx` 
+         +as a runtime dependency. Verified RLS, CORS for allowed vs. unk
+         +nown origins, the socket handshake CORS, and the smoke test. No
+         +t verified: a live connection to Supabase Postgres (needs the D
+         +B password and CA cert).                                       
+  ⎿  Updated docs/contract-deviations.md (+9 -0)
+       98  | A5 | Seat name | Free-text `name` on create/join | For a sig
+           ned-in caller with a username, the server uses the username an
+           d **ignores** the body's `name`. Guests are unchanged. | Stops
+            anyone posing as a registered player. That matters once resul
+           ts feed profiles and tournaments. |
+       99  | A6 | Bad bearer token | — | A present-but-invalid `Authoriza
+           tion` header → 401 `UNAUTHORIZED`. It never silently downgrade
+           s to a guest. | Otherwise a game could silently fail to reach 
+           the player's profile. |
+      100  | A7 | New endpoints | — | `GET /api/me`, `PUT /api/me` `{user
+           name}`, `GET /api/me/games?limit=` (finished games where the a
+           ccount holds either seat) | `me/games` is the first cross-game
+            query and the seed for Milestone 2 coaching. |
+      101 +                                                              
+      102 +## Session 2: deployment prep (Supabase Postgres, split web/AP
+          +I hosting)                                                    
+      103 +                                                              
+      104 +| # | Area | What the contract says | What was built | Why |  
+      105 +|---|---|---|---|---|                                         
+      106 +| D1 | Data API exposure | — | `003_enable_rls.sql`: RLS on fo
+          +r every table, with no policies | Supabase exposes `public` ov
+          +er its Data API to anyone holding the browser-shipped publisha
+          +ble key. Our API connects as the table owner, so it isn't affe
+          +cted by RLS. No-op on local Postgres. |                       
+      107 +| D2 | DB TLS | — | `DATABASE_CA_CERT` (PEM or path) → verifie
+          +d TLS. `sslmode` etc. are stripped from `DATABASE_URL` when it
+          +'s set. | pg treats `sslmode=require` as verify-full, and URL 
+          +SSL params override the `ssl` option. Verifying against Supaba
+          +se's CA beats `rejectUnauthorized: false`. |                  
+      108 +| D3 | Same-origin assumption (§0b) | Relative URLs via the Vi
+          +te proxy | Optional `VITE_API_URL` (REST + socket) and `WEB_OR
+          +IGIN` (CORS allowlist for Express and Socket.IO). Both unset l
+          +ocally, so dev and ngrok are unchanged. | The web app (static 
+          +host) and the API (long-running Node host) live on different d
+          +omains once deployed. |                                       
+      109 +| D4 | Runtime deps | `tsx` as a dev dependency | `tsx` moved 
+          +to `dependencies` | The API runs through `tsx` in production, 
+          +and hosts may skip dev dependencies. |                        
+
+⏺ The code changes are in and tested locally, and there's no Vercel config yet,
+  as you asked. It still hasn't connected to your actual Supabase database: that
+  needs the database password and certificate, which you'll add in your .env.
+
+  One correction to your plan: you will still need somewhere to run the backend.
+  Supabase replaces the database (the Docker Postgres), not the Node API
+  server. That server has to stay running because it holds the live socket
+  connections, keeps active games and their move locks in memory, and runs the
+  engine analysis in the background. Supabase can't host that: its Edge
+  Functions are short-lived, the same limitation as Vercel. So the deployed
+  picture is:
+
+  - Vercel: the React app
+  - A Node host (Railway, Render or Fly): the API, run as a single instance
+  - Supabase: the database and sign-in
+
+  Until you pick a host, your local API can point at Supabase just by changing
+  DATABASE_URL. That's the natural next test.
+
+  What changed
+  - Row-level security (003_enable_rls.sql
+    (backend/migrations/003_enable_rls.sql)): turned on for every table with no
+    access rules. Without it, anyone with the publishable key, which ships to
+    every browser, could read or rewrite games through Supabase's Data API. Our
+    backend owns the tables, so RLS doesn't restrict it.
+  - Verified TLS to Supabase (pool.ts (backend/src/db/pool.ts)): a new
+    DATABASE_CA_CERT setting takes Supabase's certificate so the connection is
+    fully verified. I also found that an sslmode in the URL silently overrides
+    the code's TLS settings, so the code now removes it from the URL when the
+    certificate is set.
+  - Cross-domain support: VITE_API_URL tells the frontend where the API lives
+    (for both REST and sockets), and WEB_ORIGIN sets which web domains the API
+    accepts requests from. Both are unset locally, so dev and ngrok behave
+    exactly as before.
+  - tsx moved to regular dependencies, since the API runs through it in
+    production and some hosts skip dev dependencies.
+  - Docs: .env.example documents the new settings, contract-deviations.md
+    (docs/contract-deviations.md) has D1–D4, and the AI usage log has your
+    prompts from this part of the session.
+
+  Tested: RLS is on for all four tables locally; the API answers the allowed web
+  domain and ignores others; the socket connection accepts the allowed domain;
+  the smoke test passes with RLS on; and a Supabase-style URL with special
+  characters in the password survives the URL cleanup.
+
+  To point your local API at Supabase:
+  1. In the Supabase dashboard, go to Connect → Session pooler, copy the URI and
+     insert your database password. Characters like @ or / in the password must
+     be URL-encoded.
+  2. Go to Database settings → SSL Configuration → Download certificate, and
+     save it somewhere outside the repo.
+  3. In .env:
+  DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supa
+  base.com:5432/postgres
+  DATABASE_CA_CERT=/absolute/path/to/prod-ca-2021.crt
+  4. Restart with npm start. Once DATABASE_URL is set it skips Docker and
+     creates all the tables in Supabase on first boot. They'll appear in
+     Supabase's Table Editor with RLS enabled.
+
+❯ <ide_opened_file>The user opened the file
+  /Users/mitchelrifae/Desktop/Repos/othello-crosstie/.env in the IDE. This may
+  or may not be related to the current task.</ide_opened_file>
+
+❯ instead of the crt I want to connect with something that I can save as a
+  github secret, for example the anon key
+
+⏺ No code change needed. DATABASE_CA_CERT already accepts the certificate's
+  text, not just a file path, so you can store it as a GitHub secret. The anon
+  key wouldn't work for this. Let me confirm the text form loads correctly from
+  .env.
+
+⏺ Bash(cd /private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cros
+      stie/994afb70-8f48-4d9a-851f-ff0ecdd38a27/scratchpad && printf --
+      '-----BEGIN CERTIFICA…)
+  ⎿  (No output)
+
+⏺ Tested: a single-line value with \n escapes, quoted or not, turns back into a
+  valid multi-line certificate. The code already supports this.
+
+  Why the anon key won't work here: it's a key for Supabase's HTTP Data API, not
+  for a Postgres connection. Our backend talks to Postgres directly because it
+  needs transactions and advisory locks, which the Data API doesn't offer. The
+  anon key can't log into Postgres. Moving the backend onto the Data API would
+  be a big rewrite, and it would need the service-role key anyway.
+
+  You can store everything as secrets without any files:
+
+  ┌──────────────────┬──────────────────────┬───────────────────────────────┐
+  │      Secret      │      What it is      │          Sensitive?           │
+  ├──────────────────┼──────────────────────┼───────────────────────────────┤
+  │                  │ Session pooler URI   │                               │
+  │ DATABASE_URL     │ including your DB    │ Yes. This is the real secret. │
+  │                  │ password             │                               │
+  ├──────────────────┼──────────────────────┼───────────────────────────────┤
+  │                  │ Supabase's CA        │ No, it's a public             │
+  │ DATABASE_CA_CERT │ certificate as text  │ certificate. Storing it as a  │
+  │                  │                      │ secret is just convenient.    │
+  └──────────────────┴──────────────────────┴───────────────────────────────┘
+
+  To get the certificate as one line, download it once from Database settings →
+  SSL Configuration, then run:
+  awk 'NF{printf "%s\\n",$0}' ~/Downloads/prod-ca-2021.crt
+  Paste the output into .env:
+  DATABASE_CA_CERT="-----BEGIN CERTIFICATE-----\nMIID...\n-----END
+  CERTIFICATE-----\n"
+  You can delete the .crt file afterwards. For a GitHub secret, pasting the
+  file's normal multi-line contents also works; the code accepts both forms.
+
+  The simpler alternative is to skip the certificate and set rejectUnauthorized:
+  false. The connection stays encrypted, but the server's identity isn't
+  checked, which leaves it open to man-in-the-middle attacks. Since the
+  certificate works as a secret, I'd keep full verification.
+
+  Since .env is open in your editor: it's gitignored, so the password in
+  DATABASE_URL stays local.
+
+❯ You are incorrect, I do not need the database_ca_cert. I have the DB url with
+  my db password... that should be enough for the backend to connect
+
+⏺ You may be right that it connects. Let me test with your actual DATABASE_URL,
+  without the certificate, instead of arguing it from theory.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/backend && cat >
+      .conn-test.tmp.ts <<'EOF'
+      import pg from 'pg';…)
+  ⎿  (No output)
+
+⏺ Confirmed the connection works but is unencrypted, risking plaintext data
+  transfer. I'll test adding ?sslmode=no-verify for encrypted-but-unverified
+  connection, and check how the app currently handles the existing
+  DATABASE_CA_CERT in your .env.
+
+⏺ Bash(cat > .conn-test.tmp.ts <<'EOF'
+      import pg from 'pg';…)
+  ⎿  (No output)
+
+⏺ Found a real problem. Your .env has the placeholder line from my example,
+  DATABASE_CA_CERT=/absolute/path/to/prod-ca-2021.crt, and the app crashes on
+  startup trying to read that nonexistent file. That's my fault: the example
+  looked like a value to copy.
+
+  Your approach works without a certificate. Change two things in .env, which
+  you have open:
+
+  1. Delete the DATABASE_CA_CERT=... line.
+  2. Append ?sslmode=no-verify to your DATABASE_URL:
+  DATABASE_URL=postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgr
+  es?sslmode=no-verify
+
+  Tested against your database: with no-verify the connection is encrypted.
+  Without it, it connects but in plaintext. No code change is needed, and
+  DATABASE_URL is your one GitHub secret. The certificate support stays in the
+  code as an optional hardening step; you can ignore it.
+
+  The trade-off: no-verify encrypts the traffic but doesn't confirm the server
+  is really Supabase. That's standard for a project at this stage, and you can
+  add the certificate later without code changes.
+
+  One thing for deployment: your URL uses Supabase's direct connection
+  (db.<ref>.supabase.co), which is IPv6-only. It works from your Mac, but many
+  hosts only reach IPv4. When you deploy the backend, switch to the Session
+  pooler URI (Connect → Session pooler, port 5432), keeping ?sslmode=no-verify.
+
+❯ that is fine. Now to double check, supabase is fully intergated and ready for
+  future hosting on Vercel?
+
+⏺ I'll check against your actual Supabase project instead of from memory: the
+  .env state, tables and migrations, RLS as seen from the browser key, and the
+  API running against Supabase.
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie && echo "env
+      keys:"; grep -oE '^[A-Za-z_]+ *=' .env | tr -d ' =' | tr '\n' ' '; echo;
+      set -a; . ./.env 2>/…)
+  ⎿  (No output)
+
+⏺ The .env is fixed. Next I'll boot the API against Supabase on a spare port,
+  which applies any pending migrations, then check the schema and RLS:
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie/backend &&
+      SP=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/994afb70-8f48-4d9…)
+  ⎿  (No output)
+
+⏺ Supabase is fully integrated for both sign-in and the database. The app isn't
+  completely ready for hosting yet: the frontend needs one small Vercel config
+  file, and the backend still needs a host.
+
+  What I verified against your live project:
+  - The API boots against Supabase and its health check reports the database as
+    connected.
+  - All 3 migrations are applied: the base tables, accounts, and row-level
+    security.
+  - RLS is on for all 4 tables. Reads and a write attempt through Supabase's
+    Data API with the browser key are blocked.
+  - Sign-in was already working end to end from your earlier testing.
+  - Everything is configured through environment variables, and the only secret
+    is DATABASE_URL.
+
+  Two things to know now:
+  - The Supabase database is empty (0 games, 0 accounts). The username you
+    claimed earlier lives in your local Docker database. Your Supabase login
+    still works, but the app will ask you to pick a username once more. That's
+    expected.
+  - Because DATABASE_URL is set, npm start now skips Docker and local
+    development writes to your Supabase database. That's fine for now; a
+    separate dev project is a later nicety. You can also delete the old dbpass
+    line in .env; the password now lives in the URL.
+
+  What's left before it's live:
+
+  #: 1
+  Item: A host for the backend (Railway, Render or Fly). Vercel and Supabase
+  can't run it: it needs a long-running process for sockets, live games and
+  analysis. Run a single instance.
+  Where: Hosting
+  Size: Dashboard setup
+  ────────────────────────────────────────
+  #: 2
+  Item: frontend/vercel.json so paths like /game/:id load index.html, with
+  Vercel's Root Directory set to frontend
+  Where: Code (deferred, as you asked)
+  Size: ~5 min
+  ────────────────────────────────────────
+  #: 3
+  Item: Backend DATABASE_URL → the Session pooler URI with ?sslmode=no-verify.
+  Your current direct URL is IPv6-only and most hosts can't reach it.
+  Where: Backend host's settings
+  Size: Copy and paste
+  ────────────────────────────────────────
+  #: 4
+  Item: WEB_ORIGIN=<vercel url> on the backend, and VITE_API_URL=<backend url>
+  plus the two Supabase keys on Vercel
+  Where: Host settings
+  Size: Copy and paste
+  ────────────────────────────────────────
+  #: 5
+  Item: Add the Vercel URL to Site URL and Redirect URLs under Authentication →
+  URL Configuration
+  Where: Supabase dashboard
+  Size: 1 min
+
+  Once the backend has a URL, items 2–5 take about 15 minutes.
+
+❯ If I use render for the first time I should just some free trail period
+  correct? If so, walk me through what I need to setup in render in order to
+  get a URL for our backend
+
+⏺ Close, but it's not a trial. Render has a free instance type for web services
+  that doesn't expire. Check their pricing page for current terms, since plans
+  change. What matters for us:
+
+  - It sleeps after about 15 minutes with no traffic. The next visitor waits
+    about a minute while it wakes up. That's acceptable for a demo: every move
+    is saved to Postgres, and unfinished analysis restarts on boot, so nothing
+    is lost. Before a live walkthrough, open the health URL once to wake it.
+  - WebSockets work on the free tier, so Socket.IO is fine.
+  - It runs a single instance, which is exactly what our backend needs.
+
+  Before Render: push your code
+
+  Render deploys from GitHub, and everything from this session is still
+  uncommitted. That includes changes it depends on: tsx as a runtime dependency,
+  the CORS support and the migrations. Commit and push to main first. I can
+  draft the commits if you want.
+
+  Setup in Render
+
+  1. Sign up at render.com with GitHub, and allow access to the othello-crosstie
+     repo.
+  2. New → Web Service, then pick the repo.
+  3. Settings:
+
+  ┌──────────┬────────────────────┬────────────────────────────────────────┐
+  │  Field   │       Value        │                  Why                   │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │ Name     │ e.g. othello-cross │ Becomes https://othello-crosstie-api.o │
+  │          │ tie-api            │ nrender.com                            │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │          │ Closest to your    │ Every move is a database write. Your   │
+  │ Region   │ Supabase region    │ Supabase region is in the Session      │
+  │          │                    │ pooler host name (aws-0-<region>…).    │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │ Branch   │ main               │ Auto-deploys on every push             │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │ Root Dir │                    │ The backend imports the shared         │
+  │ ectory   │ leave blank        │ workspace, so it installs from the     │
+  │          │                    │ repo root                              │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │ Runtime  │ Node               │                                        │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │          │                    │ Installs all workspaces exactly from   │
+  │ Build    │ npm ci             │ the lockfile. There's no build step    │
+  │ Command  │                    │ because the backend runs TypeScript    │
+  │          │                    │ through tsx.                           │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │ Start    │ npm run start -w   │ Runs pending migrations, then starts   │
+  │ Command  │ backend            │ the API                                │
+  ├──────────┼────────────────────┼────────────────────────────────────────┤
+  │ Instance │ Free               │                                        │
+  │  Type    │                    │                                        │
+  └──────────┴────────────────────┴────────────────────────────────────────┘
+
+  4. Environment Variables:
+
+  Key: DATABASE_URL
+  Value: The Session pooler URI, not your current direct one, plus
+  ?sslmode=no-verify. In Supabase: Connect → Session pooler. It looks like
+  postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432
+  /postgres?sslmode=no-verify.
+   Render can't reach Supabase's IPv6-only direct host.
+  ────────────────────────────────────────
+  Key: SUPABASE_URL
+  Value: Same value as your VITE_SUPABASE_URL
+  ────────────────────────────────────────
+  Key: NODE_VERSION
+  Value: 22 (pins a version our code supports, instead of whatever "≥20"
+  resolves
+  to)
+
+  Don't set PORT; Render provides it and our config already reads it. Leave out
+  WEB_ORIGIN until you have the Vercel URL.
+
+  5. Advanced → Health Check Path: /api/health. Render then only switches
+     traffic to a new deploy once the API responds and the database is
+     reachable.
+  6. Create Web Service. The first deploy takes a few minutes. In the logs, look
+     for:
+  [migrate] up to date (3 migrations)
+  [api] listening on http://localhost:10000
+     The "localhost" wording is just our log line; Render routes the public URL
+     to it.
+  7. Check it: open https://<name>.onrender.com/api/health and expect
+     {"ok":true,"db":true}. If db is false, the DATABASE_URL is wrong; the
+     pooler URI and password are the usual suspects.
+
+  That URL is your backend. When you do the Vercel step, it becomes VITE_API_URL
+  there, and the Vercel URL becomes WEB_ORIGIN here.
+
+  I can also add a render.yaml to the repo, which stores all these settings as
+  code so the deploy is reproducible and reviewable. It's optional; the
+  dashboard steps above are enough.
+
+❯ If you add the yaml then all these settings are automatically applied and I
+  dont have to set them when creating a new webservice?
+
+⏺ Mostly, yes, with two caveats:
+
+  1. Create it as a Blueprint (New → Blueprint), not New → Web Service. Render
+     reads render.yaml from the repo and creates the service with every setting
+     from it.
+  2. Secrets aren't stored in the file. DATABASE_URL is marked sync: false, so
+     Render asks you to paste it once while creating the Blueprint and never
+     writes it to Git. I'm treating SUPABASE_URL the same way (it's public, but
+     this keeps the repo from being tied to one Supabase project), so that's one
+     more paste.
+
+  After that, settings changed in the YAML and pushed are applied automatically.
+
+⏺ Write(render.yaml)
+  ⎿  Wrote 30 lines to render.yaml
+       1 # Render Blueprint for the API (New → Blueprint in the Render da
+       2 # The web client deploys separately (Vercel); Postgres and auth
+         are Supabase.
+       4   - type: web
+       5     name: othello-crosstie-api
+       7     plan: free                      # sleeps after ~15 min idle;
+          state is in Postgres, analysis re-queues on boot
+         very move is a DB write.
+       9     # Can't be changed after creation. Options include oregon, o
+      10     region: oregon
+     … +32 lines (ctrl+o to expand)
+
+⏺ Update(render.yaml)
+  ⎿  Added 1 line, removed 1 line
+      12      # Installs every workspace (the API imports @othello/shared
+          ). No build step: tsx runs the TypeScript.
+      13      buildCommand: npm ci
+      14      # Applies pending migrations, then serves REST + Socket.IO.
+           Must stay a single instance:
+      15 -    # live games and their locks are held in memory (see docs/r
+         -oadmap for the Redis/queue plan).                              
+      15 +    # live games and their locks are held in memory (design-con
+         +tract.md §7.2: Redis adapter + DB job queue to scale out).     
+      16      startCommand: npm run start -w backend
+      17      healthCheckPath: /api/health    # 200 only once the API is 
+          up; the body reports DB reachability
+      18      envVars:
+
+⏺ Bash(cd /Users/mitchelrifae/Desktop/Repos/othello-crosstie && python3 -c
+      "import
+      yaml,json;print(json.dumps(yaml.safe_load(open('render.yaml')),indent=1))"
+      2>/dev/nu…)
+  ⎿  (No output)
+
+⏺ I added render.yaml at the repo root. It parses as valid YAML, but I can't
+  check it against Render's own schema from here; the Blueprint screen will flag
+  any field it doesn't accept.
+
+  Before you push, check one thing: the region. I set oregon (US West) as a
+  placeholder, and it can't be changed after the service is created. Find your
+  Supabase region under Project Settings → General and change region: to the
+  closest Render region if it isn't US West. For example, us-east-1 → virginia
+  and eu-central-1 → frankfurt.
+
+  Steps:
+  1. Commit and push to main, including render.yaml and the rest of this
+     session's changes.
+  2. In Render: New → Blueprint → pick the repo. Render shows the service it
+     will create from the file.
+  3. Paste the two values it asks for:
+     - DATABASE_URL: the Session pooler URI with ?sslmode=no-verify
+     - SUPABASE_URL: your VITE_SUPABASE_URL value
+  4. Apply. When the deploy finishes, open
+     https://othello-crosstie-api.onrender.com/api/health and expect
+     {"ok":true,"db":true}. If the name is already taken, Render adds a suffix
+     to the URL; the dashboard shows the real one.
+
+  Keep changes in the file. Settings changed only in the dashboard can be
+  overwritten the next time Render syncs the Blueprint from the YAML. The one
+  exception is the two secrets, which live only in Render.
+
+  Later: when the Vercel app has a URL, uncomment the WEB_ORIGIN block in
+  render.yaml with that URL and push. Render redeploys with CORS allowing it.
+
+❯ The initial launch failed to deploy... If you dont see the error, let me know
+  what we can do to help debug:
+  [api] failed to start: connect ENETUNREACH
+  2600:1f18:5905:6801:5cae:2421:ac6b:3e55:5432 - Local (:::0)
+  npm error Lifecycle script start failed with error:
+  npm error code 1
+  npm error path /opt/render/project/src/backend
+  npm error workspace @othello/backend@0.0.0
+  npm error location /opt/render/project/src/backend
+  npm error command failed
+  npm error command sh -c tsx src/server.ts
+  ==> Exited with status 1
+  ==> Common ways to troubleshoot your deploy:
+  https://render.com/docs/troubleshooting-deploys
+  ==> Running 'npm run start -w backend'
+  > @othello/backend@0.0.0 start
+  > tsx src/server.ts
+  [api] failed to start: connect ENETUNREACH
+  2600:1f18:5905:6801:5cae:2421:ac6b:3e55:5432 - Local (:::0)
+  npm error Lifecycle script start failed with error:
+  npm error code 1
+  npm error path /opt/render/project/src/backend
+  npm error workspace @othello/backend@0.0.0
+  npm error location /opt/render/project/src/backend
+  npm error command failed
+  npm error command sh -c tsx src/server.ts
+
+⏺ I can see the error, and it's the IPv6 issue from earlier.
+
+  connect ENETUNREACH 2600:1f18:…:5432 means the API tried to reach Postgres at
+  an IPv6 address, and Render's network couldn't route to it. So the
+  DATABASE_URL set in Render is the direct connection string
+  (db.<ref>.supabase.co), whose host only has an IPv6 address. Render can only
+  make outbound connections over IPv4. The code is fine: the build succeeded and
+  the server started; only the database connection failed.
+
+  The fix is in Render, not the code:
+  1. In Supabase, click Connect at the top of the project → Session pooler (not
+     "Direct connection", and not "Transaction pooler").
+  2. Copy that URI. The two things that tell it apart:
+     - User is postgres.<your-project-ref>, not just postgres
+     - Host is aws-0-<region>.pooler.supabase.com, with port 5432
+  3. Insert your password (URL-encode any @, /, # or ? in it) and append
+     ?sslmode=no-verify.
+  4. In Render: your service → Environment → edit DATABASE_URL → Save, rebuild,
+     and deploy.
+
+  Also check the region. The address in the error, 2600:1f18:…, belongs to AWS's
+  us-east-1 (N. Virginia), which I'm fairly confident means your Supabase
+  project runs there. The Render service was created in oregon unless you
+  changed it, so every database query would cross the country. Each move does
+  several of them, which would add a noticeable delay per move. Region can't be
+  changed after creation, but the service is brand new, so this is the moment to
+  fix it:
+  1. In render.yaml, change region: oregon to region: virginia, then commit and
+     push.
+  2. In Render, delete the service. Then create it again with New → Blueprint,
+     pasting the pooler DATABASE_URL this time.
+
+  If you already picked a US-East region, just do the DATABASE_URL fix.
+
+  After the redeploy, the logs should show [migrate] up to date (3 migrations)
+  and /api/health should return {"ok":true,"db":true}. If it still fails, paste
+  the new error. A different error means we're past the network problem:
+  password authentication failed would point to the password or its encoding,
+  and Tenant or user not found to the user or host part of the pooler URI.
+
+❯ ok the build was successful but when going to the URL it get:
+  Cannot GET /
+
+⏺ That's expected, and it means the deploy worked: the server answered. Express
+  sends Cannot GET / when nothing handles a path. This backend only serves
+  /api/* and /socket.io; the web pages will come from Vercel. Nothing is served
+  at /.
+
+  To check the deploy, open:
+
+  https://<your-service>.onrender.com/api/health
+
+  ┌────────────────────────┬─────────────────────────────────────────────────┐
+  │        Response        │                     Meaning                     │
+  ├────────────────────────┼─────────────────────────────────────────────────┤
+  │ {"ok":true,"db":true}  │ Everything works: the API is up and connected   │
+  │                        │ to Supabase                                     │
+  ├────────────────────────┼─────────────────────────────────────────────────┤
+  │ {"ok":true,"db":false} │ The API is up but can't reach the database.     │
+  │                        │ Recheck DATABASE_URL.                           │
+  └────────────────────────┴─────────────────────────────────────────────────┘
+
+  With the first response, this https://<your-service>.onrender.com URL (no
+  path) is what goes into VITE_API_URL on Vercel.
+
+  I can add a small response at /, e.g.
+  {"service":"othello-crosstie-api","health":"/api/health"}, so the bare URL
+  doesn't look broken. It's optional; nothing depends on it.
+❯ ok great, I see... everything seems to be working then
+
+⏺ Good. I'll add the Render part of the session to your AI usage log so it
+  matches the rest.
+
+⏺ Bash(cat >> docs/ai-usage/03-accounts-session.md <<'EOF'…)
+  ⎿  Created docs/ai-usage/03-accounts-session.md (+10 -0)
+       1 +                                                               
+       2 +## Deploying the API to Render                                 
+       3 +                                                               
+       4 +Prompts, condensed: whether `DATABASE_URL` alone is enough with
+         +out a CA cert; whether Supabase is fully integrated; how to set
+         + up Render; whether a `render.yaml` removes the manual setup; a
+         +nd pasted deploy errors.                                       
+       5 +                                                               
+       6 +- **TLS:** the user was right that `DATABASE_URL` alone connect
+         +s. Testing against the live DB showed it connected **unencrypte
+         +d**, and that the `.env` had copied my placeholder CA path, whi
+         +ch crashed startup. Resolution: drop the CA and append `?sslmod
+         +e=no-verify` (encrypted, not verified). No code change. CA veri
+         +fication remains optional hardening.                           
+       7 +- **Verified on Supabase:** 3 migrations applied, RLS on for al
+         +l tables, and the Data API returns nothing with the publishable
+         + key.                                                          
+       8 +- **`render.yaml` Blueprint:** free web service, `npm ci`, `npm
+         + run start -w backend`, health check `/api/health`. `DATABASE_U
+         +RL`/`SUPABASE_URL` are `sync: false`, so they're prompted for a
+         +nd never committed.                                            
+       9 +- **First deploy failed:** `ENETUNREACH` to an IPv6 address. Re
+         +nder has no outbound IPv6, and Supabase's direct host is IPv6-o
+         +nly. Fix: the Session pooler URI. The address prefix (AWS us-ea
+         +st-1) suggested moving the Render region to `virginia`.        
+      10 +- `Cannot GET /` on the service URL is expected: the API only s
+         +erves `/api/*` and `/socket.io`. `/api/health` confirmed `{"ok"
+         +:true,"db":true}`.                                             
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ no need, I will /export this chat after we deploy vercel
+
+⏺ The append had already run before you interrupted, so I'll remove just that
+  section and leave the rest of the file as it was.
+
+⏺ Bash(python3 - <<'EOF'
+      p='docs/ai-usage/03-accounts-session.md'…)
+  ⎿  Error: Exit code 128
+     Traceback (most recent call last):
+       File "<stdin>", line 2, in <module>
+     FileNotFoundError: [Errno 2] No such file or directory:
+     'docs/ai-usage/03-accounts-session.md'
+     tail: docs/ai-usage/03-accounts-session.md: No such file or directory
+     fatal: ambiguous argument 'docs/ai-usage/03-accounts-session.md': unknown
+     revision or path not in the working tree.
+     Use '--' to separate paths from revisions, like this:
+     'git <command> [<revision>...] -- [<file>...]'
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ What needs to be done, if anything, for this to be hosted on Vercel?
+
+⏺ The AI log file seems to have been renamed/moved, so my removal edit didn't
+  find anything—if the Render section landed in the renamed file, it's the last
+  section and safe to delete manually. Now checking the current frontend for
+  Vercel, since new tournament work may add same-origin API calls that would
+  break in production.
+
+⏺ Bash(grep -rnE "fetch\(|io\(|'/api|\`/api|/socket.io" frontend/src | grep -v
+      "^frontend/src/mocks"; ls vercel.json frontend/vercel.json 2>&1 | grep -v
+      "No such"; npm…)
+  ⎿  (No output)
+
+⏺ All API calls including the tournament code route through httpClient, so
+  VITE_API_URL covers them and the build passes. I'll add a Vercel config at the
+  root, mirroring the "settings as code" approach used in render.yaml.
+
+⏺ Write(vercel.json)
+  ⎿  Wrote 8 lines to vercel.json
+      1 {
+      2   "$schema": "https://openapi.vercel.sh/vercel.json",
+      3   "framework": "vite",
+      4   "installCommand": "npm ci",
+      5   "buildCommand": "npm run build -w frontend",
+      6   "outputDirectory": "frontend/dist",
+      7   "rewrites": [{ "source": "/(.*)", "destination": "/index.html"
+        }]
+      8 }
+
+⏺ The only code change needed was one file, vercel.json, which I've added.
+  Everything else is dashboard settings.
+
+  What the file does
+  - Installs and builds from the repo root (npm ci, then npm run build -w
+    frontend, output in frontend/dist). The frontend imports the shared
+    workspace, so installing from the frontend folder alone would fail.
+  - Sends every path to index.html, so a refresh or a shared link to /game/:id
+    or a tournament page loads the app instead of Vercel's 404. Real files like
+    the JS and CSS bundles are still served directly.
+
+  Steps
+
+  1. Commit and push vercel.json.
+  2. Vercel → Add New → Project → import the repo.
+     - Root Directory: leave blank. The file handles install, build and output,
+       so leave the other build settings alone too.
+     - Environment Variables:
+
+  | Key                           | Value
+                |
+  |-------------------------------|---------------------------------------------
+  ---------------|
+  | VITE_API_URL                  | https://<your-service>.onrender.com, with no
+  trailing path |
+  | VITE_SUPABASE_URL             | same as your .env
+                |
+  | VITE_SUPABASE_PUBLISHABLE_KEY | same as your .env
+                |
+
+     - Deploy. Note the production URL, e.g.
+       https://othello-crosstie.vercel.app.
+  3. Render: in render.yaml, uncomment the WEB_ORIGIN block with that Vercel URL
+     (no trailing slash), then push. Without it, the browser blocks every API
+     call from the Vercel site.
+  4. Supabase → Authentication → URL Configuration: set Site URL to the Vercel
+     URL and add it to Redirect URLs. Keep http://localhost:5173 there too so
+     local development still works. Otherwise email confirmation links lead to
+     localhost.
+
+  Gotchas
+  - VITE_* values are baked in at build time. If you change one in Vercel,
+    redeploy for it to take effect.
+  - Vercel preview deployments won't reach the API. Each preview gets its own
+    URL, and WEB_ORIGIN only lists production. That's fine for now; WEB_ORIGIN
+    takes a comma-separated list if you ever need a preview.
+  - The Render free tier sleeps after about 15 minutes idle. The first page load
+    after that waits about a minute for the API, so open the site once before a
+    demo.
+
+  To check it: open the Vercel URL in two browsers, sign in on one, and play a
+  game against a guest on the other. A failure shows up as a CORS error in the
+  browser console, which almost always means WEB_ORIGIN doesn't exactly match
+  the Vercel URL.
+
+  I haven't pushed or deployed anything. The frontend build passes locally, with
+  only a warning about a large bundle, which doesn't block the deploy.
+
+❯ These warnings are stopping the vercel deployment:
+  Running build in Washington, D.C., USA (East) – iad1
+  Build machine configuration: 2 cores, 8 GB
+  Cloning github.com/mrifae01/othello-crosstie (Branch: main, Commit: bf10137)
+  Previous build caches not available.
+  Cloning completed: 648.000ms
+  Running "vercel build"
+  Vercel CLI 59.25.4
+  Running "install" command: npm ci...
+  added 98 packages, and audited 101 packages in 4s
+  19 packages are looking for funding
+    run npm fund for details
+  5 vulnerabilities (3 moderate, 1 high, 1 critical)
+  To address all issues (including breaking changes), run:
+    npm audit fix --force
+  Run npm audit for details.
+  npm warn install-scripts 2 packages have install scripts not yet covered by
+  allowScripts:
+  npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+  npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js)
+  npm warn install-scripts
+  npm warn install-scripts Run npm install-scripts ls to review, or npm
+  install-scripts approve <pkg> to allow.
+
+⏺ Those warnings aren't what's stopping the build: npm warnings don't fail a
+  deploy, and your paste ends right after the install step succeeds. The real
+  error comes later, during npm run build -w frontend. Rather than guess, I'll
+  reproduce Vercel's exact steps on a clean checkout of the deployed commit
+  (bf10137).
+
+⏺ Bash(git log --oneline -3 && git cat-file -t bf10137 &&
+      WT=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cross
+      tie/994afb70-8f48-4d9a-851f-ff0ecdd…)
+  ⎿  (No output)
+  ⎿  (timeout 5m)
+
+⏺ The build works fine on a clean checkout, but I noticed Vercel installed only
+  98 packages versus 231 locally with npm ci. I'll check whether Vercel is
+  skipping dev dependencies.
+
+⏺ Bash(cd /private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cros
+      stie/994afb70-8f48-4d9a-851f-ff0ecdd38a27/scratchpad/vercel-repro && rm
+      -rf node_module…)
+  ⎿  (No output)
+
+⏺ Found it: exit code 127 means tsc/vite (dev dependencies) weren't installed,
+  likely because NODE_ENV=production caused npm to skip them. I'll update the
+  install command to explicitly include dev dependencies regardless of
+  environment.
+
+⏺ Bash(sed -i '' 's/"installCommand": "npm ci"/"installCommand": "npm ci
+      --include=dev"/' vercel.json && cat vercel.json &&
+      WT=/private/tmp/claude-501/-Users-mitchelri…)
+  ⎿  Updated vercel.json (+1 -1)
+      1  {
+      2    "$schema": "https://openapi.vercel.sh/vercel.json",
+      3    "framework": "vite",
+      4 -  "installCommand": "npm ci",                                   
+      4 +  "installCommand": "npm ci --include=dev",                     
+      5    "buildCommand": "npm run build -w frontend",
+      6    "outputDirectory": "frontend/dist",
+      7    "rewrites": [{ "source": "/(.*)", "destination": "/index.html"
+          }]
+
+⏺ My verification never ran: a shell glob error aborted the command chain before
+  the build, and the cleanup then removed the checkout. I'll run it again
+  properly:
+
+⏺ Bash(WT=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cros
+      stie/994afb70-8f48-4d9a-851f-ff0ecdd38a27/scratchpad/vercel-repro && git
+      worktree add -…)
+  ⎿  (No output)
+  ⎿  (timeout 5m)
+
+⏺ Fixed in vercel.json. The install command is now npm ci --include=dev. Commit
+  and push it, and Vercel will redeploy.
+
+  What was wrong: the warnings you pasted weren't the problem. The log you
+  pasted stops before the build step, where the actual error is. What gave it
+  away was that Vercel installed only 98 packages, while a full install is 231.
+  The build tools (tsc, vite) are dev dependencies, and they were skipped, so
+  the build failed with "command not found."
+
+  How I checked it: I built a clean checkout of your deployed commit (bf10137)
+  with NODE_ENV=production set:
+
+  ┌───────────────────────────┬──────────┬──────────────────────────────────┐
+  │          Install          │ Packages │              Build               │
+  ├───────────────────────────┼──────────┼──────────────────────────────────┤
+  │ npm ci (old command)      │ 134      │ fails, exit 127 (command not     │
+  │                           │          │ found)                           │
+  ├───────────────────────────┼──────────┼──────────────────────────────────┤
+  │ npm ci --include=dev      │ 231      │ succeeds                         │
+  │ (new)                     │          │                                  │
+  └───────────────────────────┴──────────┴──────────────────────────────────┘
+
+  The likely reason is NODE_ENV=production set in your Vercel environment
+  variables, since npm skips dev dependencies when it is. If you added it,
+  remove it; Vite already builds for production without it. The new install
+  command works either way.
+
+  About the warnings themselves:
+  - install-scripts … esbuild: harmless. Vite 8 doesn't use esbuild for the
+    build, and the local build works with those scripts blocked too.
+  - 5 vulnerabilities: an informational audit, not a blocker. Don't run npm
+    audit fix --force right before a deploy, because it can upgrade major
+    versions. We can look at it after the deploy works.
+
+  If the redeploy still fails, paste the log from the build step (after "Running
+  build command"), which is where the actual error would show.
+
+❯ Running build in Washington, D.C., USA (East) – iad1
+  Build machine configuration: 2 cores, 8 GB
+  Cloning github.com/mrifae01/othello-crosstie (Branch: main, Commit: 2cba093)
+  Previous build caches not available.
+  Cloning completed: 412.000ms
+  Running "vercel build"
+  Vercel CLI 59.25.4
+  Running "install" command: npm ci --include=dev...
+  added 98 packages, and audited 101 packages in 5s
+  19 packages are looking for funding
+    run npm fund for details
+  5 vulnerabilities (3 moderate, 1 high, 1 critical)
+  To address all issues (including breaking changes), run:
+    npm audit fix --force
+  Run npm audit for details.
+  npm warn install-scripts 2 packages have install scripts not yet covered by
+  allowScripts:
+  npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+  npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js)
+  npm warn install-scripts
+  npm warn install-scripts Run npm install-scripts ls to review, or npm
+  install-scripts approve <pkg> to allow.
+  npm error No workspaces found:
+  npm error   --workspace=frontend
+  npm error A complete log of this run can be found in:
+  /vercel/.npm/_logs/2026-09-27T15_07_46_341Z-debug-0.log
+  Error: Command "npm run build -w frontend" exited with 1
+
+⏺ This error is different: No workspaces found: --workspace=frontend, and it's
+  still only 98 packages even with dev dependencies included. That points to npm
+  not seeing the workspace setup at all. I'll check what's in the deployed
+  commit, since Vercel builds what's on GitHub, not your local files.
+
+⏺ Bash(git fetch -q origin 2>&1; git log --oneline -4 origin/main; echo "---
+      root package.json @2cba093:"; git show 2cba093:package.json | head -20;
+      echo "--- files at…)
+  ⎿  (No output)
+
+⏺ The repo config itself looks fine—workspaces are declared and the lockfile has
+  all 331 entries—so the issue likely lies in Vercel's project settings,
+  probably the Root Directory being set to frontend. I'll reproduce that
+  scenario to confirm.
+
+⏺ Bash(WT=/private/tmp/claude-501/-Users-mitchelrifae-Desktop-Repos-othello-cros
+      stie/994afb70-8f48-4d9a-851f-ff0ecdd38a27/scratchpad/vercel-repro2 && git
+      worktree add…)
+  ⎿  (No output)
+
+⏺ The cause is the Vercel project setting Root Directory = frontend. I
+  reproduced your log exactly: running the install and build from inside
+  frontend/ gives the same 98 packages and the same No workspaces found:
+  --workspace=frontend error.
+
+  The commands in vercel.json expect to run from the repo root. From inside
+  frontend/, npm only installs that one workspace, and -w frontend looks for a
+  nonexistent frontend/frontend.
+
+  Fix (dashboard only, no code change):
+  1. Vercel → your project → Settings → Build and Deployment → Root Directory
+  2. Clear it so it's empty (the repo root), then save.
+  3. Check that the Build Command, Output Directory and Install Command
+     overrides on that page are off, so vercel.json controls them.
+  4. Deployments → ⋯ → Redeploy on the latest commit.
+
+  The log should then show about 231 packages installed and ✓ built in ….
+
+  A correction on my last diagnosis: the 98 packages was this Root Directory
+  setting all along, not NODE_ENV. The --include=dev change fixes a real failure
+  (I reproduced it under NODE_ENV=production), but it wasn't what broke your
+  deploy. It's harmless to keep and protects against that case.
+
+  If you'd rather keep Root Directory as frontend, the alternative is moving
+  vercel.json into frontend/ and changing its commands to run from there.
+  Clearing the setting is simpler and matches how render.yaml works.
+❯ Great, now that is deployed and I have a URL, walk me through what I need to
+  do in render/supabase?
+
+⏺ Three things are left: tell the API to accept your Vercel site, point Supabase
+  sign-in at it, and check that the frontend knows where the API is.
+
+  1. Render: allow the Vercel site (CORS)
+
+  In render.yaml, replace the commented WEB_ORIGIN lines at the bottom with:
+
+        - key: WEB_ORIGIN
+          value: https://<your-app>.vercel.app
+
+  - Use exactly the origin shown in the browser's address bar: https://, no
+    trailing slash, no path. The browser compares it character for character.
+  - Commit and push. Render syncs the Blueprint and redeploys, which takes a few
+    minutes.
+  - If you use more than one domain (say, a custom one later), separate them
+    with commas: https://a.vercel.app,https://play.example.com.
+
+  If you'd rather not wait on a push, you can add it under Render → your service
+  → Environment. But keep it in the YAML too, or a later Blueprint sync may
+  remove it.
+
+  2. Supabase: sign-in redirects
+
+  Supabase → Authentication → URL Configuration:
+  - Site URL: https://<your-app>.vercel.app
+  - Redirect URLs: add https://<your-app>.vercel.app/**, and keep
+    http://localhost:5173/** so local development still works.
+
+  Without this, email confirmation links send people to localhost. Nothing needs
+  to change in the database.
+
+  3. Vercel: check the API URL
+
+  Under Vercel → Settings → Environment Variables, make sure these three exist
+  for Production:
+
+  ┌───────────────────────────────┬──────────────────────────────────────────┐
+  │              Key              │                  Value                   │
+  ├───────────────────────────────┼──────────────────────────────────────────┤
+  │ VITE_API_URL                  │ https://<your-service>.onrender.com (no  │
+  │                               │ trailing slash, no /api)                 │
+  ├───────────────────────────────┼──────────────────────────────────────────┤
+  │ VITE_SUPABASE_URL             │ your Supabase URL                        │
+  ├───────────────────────────────┼──────────────────────────────────────────┤
+  │ VITE_SUPABASE_PUBLISHABLE_KEY │ your publishable key                     │
+  └───────────────────────────────┴──────────────────────────────────────────┘
+
+  If you added any of them after the deploy that just succeeded, redeploy: these
+  values are baked in at build time. A missing VITE_API_URL shows up as the
+  home page failing to load games with a server error, because the calls hit
+  Vercel instead of Render.
+
+  4. End-to-end test
+
+  1. Open https://<your-service>.onrender.com/api/health first to wake the free
+     instance. Wait for {"ok":true,"db":true}.
+  2. Open the Vercel URL, sign up or sign in, and pick a username. This is the
+     first account in the Supabase database.
+  3. Create a game and open the invite link in a private window as a guest. Play
+     some moves, or resign to finish quickly.
+  4. Check that the analysis appears and the game shows under "Your recent
+     games."
+
+  If something fails, open the browser DevTools console:
+
+  ┌──────────────────────────────┬──────────────────────────────────────────┐
+  │           Symptom            │                  Cause                   │
+  ├──────────────────────────────┼──────────────────────────────────────────┤
+  │ blocked by CORS policy       │ WEB_ORIGIN doesn't exactly match, or     │
+  │                              │ Render hasn't redeployed yet             │
+  ├──────────────────────────────┼──────────────────────────────────────────┤
+  │ Requests go to               │ VITE_API_URL is missing; set it and      │
+  │ …vercel.app/api/…            │ redeploy on Vercel                       │
+  ├──────────────────────────────┼──────────────────────────────────────────┤
+  │ Sign-in works but "Account   │ Render's SUPABASE_URL is missing or      │
+  │ unavailable"                 │ wrong                                    │
+  ├──────────────────────────────┼──────────────────────────────────────────┤
+  │ Confirmation email links to  │ Supabase Site URL (step 2)               │
+  │ localhost                    │                                          │
+  └──────────────────────────────┴──────────────────────────────────────────┘
+
+  Send me your Vercel URL and I'll make the render.yaml edit so you only need to
+  push.
