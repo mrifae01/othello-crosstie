@@ -7,7 +7,8 @@ import { useLiveGame } from '../data/useLiveGame';
 import { Board } from '../components/Board';
 import { MoveList } from '../components/MoveList';
 import { SeatForm } from '../components/SeatForm';
-import { PlayersCard } from '../components/PlayersCard';
+import { PlayerBar } from '../components/PlayerBar';
+import { FlagIcon, PlayIcon, ReviewIcon, SparkleIcon } from '../components/icons';
 import { AnalysisBar } from '../components/AnalysisBar';
 import { useToasts } from '../components/Toasts';
 import { useLeaveGuard } from '../components/LeaveGuard';
@@ -96,10 +97,17 @@ function GameView({ gameId }: { gameId: string }) {
   }
 
   const showJoin = state.status === 'waiting' && seatKnown && you === null;
+  // Your seat sits under the board (Black for spectators); the opponent is on top.
+  const bottom: Player = you ?? 'B';
+  const top: Player = bottom === 'B' ? 'W' : 'B';
+  const bar = (p: Player) => (
+    <PlayerBar color={p} info={state.players[p]} count={state.counts[p]} toMove={state.turn === p} isYou={you === p} />
+  );
 
   return (
-    <div className="game-layout">
-      <section className="board-col">
+    <div className="stage">
+      <section className="stage-board">
+        {bar(top)}
         <Board
           board={state.board}
           legalMoves={myTurn ? state.legalMoves : []}
@@ -108,18 +116,20 @@ function GameView({ gameId }: { gameId: string }) {
           onSquareClick={play}
           disabled={state.status !== 'active' || you === null || !token || moving}
         />
+        {bar(bottom)}
       </section>
 
-      <aside className="side-col">
-        <PlayersCard game={state} turn={state.turn} you={you} />
+      <aside className="stage-panel">
+        <header className="panel-head">
+          <PlayIcon size={22} /> {state.status === 'finished' ? 'Game over' : state.status === 'waiting' ? 'New game' : 'Live game'}
+          {seatKnown && you === null && state.status !== 'waiting' && <span className="panel-head-note">Spectating</span>}
+        </header>
 
-        <div className="panel status-panel">
+        <div className="panel-section status-panel">
           {showJoin && (
             <>
               <h3>Join this game</h3>
-              <p className="muted small">
-                {state.players.B.name} is waiting. You'll play White.
-              </p>
+              <p className="muted small">{state.players.B.name} is waiting. You'll play White.</p>
               <SeatForm submitLabel="Join as White" busy={joining} prefill={false} onSubmit={join} />
             </>
           )}
@@ -128,9 +138,7 @@ function GameView({ gameId }: { gameId: string }) {
 
           {state.status === 'waiting' && seatKnown && you === 'W' && <p>Joining…</p>}
 
-          {state.status === 'active' && (
-            <TurnLine state={state} you={you} myTurn={myTurn} />
-          )}
+          {state.status === 'active' && <TurnLine state={state} you={you} myTurn={myTurn} />}
 
           {state.status !== 'finished' && lastMove?.square === null && (
             <p className="notice">
@@ -142,18 +150,28 @@ function GameView({ gameId }: { gameId: string }) {
             <GameOver state={state} you={you} progress={progress} analysisReady={analysisReady} />
           )}
 
-          {seatKnown && you === null && state.status !== 'waiting' && (
-            <p className="muted small">You're watching as a spectator.</p>
-          )}
           {error && <p className="error-text small">{error}</p>}
         </div>
 
-        {state.status === 'active' && you !== null && token && <ResignControl gameId={gameId} token={token} />}
-
-        <div className="panel">
-          <h3>Moves</h3>
+        <div className="panel-section panel-grow">
+          <h3 className="section-label">Moves</h3>
           <MoveList moves={state.moves} />
         </div>
+
+        {state.status !== 'finished' && (
+          <div className="panel-section coach-teaser">
+            <SparkleIcon size={18} />
+            <span className="small">
+              When this game ends, the engine reviews every move. <span className="muted">AI coach explanations coming soon.</span>
+            </span>
+          </div>
+        )}
+
+        {state.status === 'active' && you !== null && token && (
+          <footer className="panel-foot">
+            <ResignControl gameId={gameId} token={token} />
+          </footer>
+        )}
       </aside>
     </div>
   );
@@ -230,7 +248,7 @@ function ResignControl({ gameId, token }: { gameId: string; token: string }) {
         </>
       ) : (
         <button type="button" className="btn btn-resign" onClick={() => setConfirming(true)}>
-          Resign…
+          <FlagIcon size={18} /> Resign…
         </button>
       )}
     </div>
@@ -274,11 +292,11 @@ function GameOver({ state, you, progress, analysisReady }: GameOverProps) {
 
       <button
         type="button"
-        className="btn btn-primary btn-wide"
+        className="btn btn-primary btn-xl btn-block"
         disabled={!done}
         onClick={() => navigate(`/game/${state.gameId}/analysis`)}
       >
-        Review game
+        <ReviewIcon size={22} /> Game Review
       </button>
     </div>
   );

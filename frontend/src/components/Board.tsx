@@ -24,6 +24,8 @@ export interface BoardProps {
    */
   onSquareClick?: (square: Square) => void;
   disabled?: boolean;
+  /** File/rank labels around the board. Off for small illustrative diagrams. */
+  coords?: boolean;
 }
 
 export function Board({
@@ -36,22 +38,27 @@ export function Board({
   highlighted = [],
   onSquareClick,
   disabled = false,
+  coords = true,
 }: BoardProps) {
   const legal = new Set(legalMoves);
   const hl = new Set(highlighted);
 
   return (
-    <div className="board-frame">
-      <div className="board-files" aria-hidden>
-        {FILES.map((f) => (
-          <span key={f}>{f}</span>
-        ))}
-      </div>
-      <div className="board-ranks" aria-hidden>
-        {RANKS.map((r) => (
-          <span key={r}>{r}</span>
-        ))}
-      </div>
+    <div className={`board-frame${coords ? '' : ' board-frame-plain'}`}>
+      {coords && (
+        <>
+          <div className="board-files" aria-hidden>
+            {FILES.map((f) => (
+              <span key={f}>{f}</span>
+            ))}
+          </div>
+          <div className="board-ranks" aria-hidden>
+            {RANKS.map((r) => (
+              <span key={r}>{r}</span>
+            ))}
+          </div>
+        </>
+      )}
       <div className="board" role="grid" aria-label="Othello board">
         {board.map((cell, sq) => {
           const isLegal = legal.has(sq);

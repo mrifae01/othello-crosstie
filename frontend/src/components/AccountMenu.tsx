@@ -16,11 +16,11 @@ export function AccountMenu() {
     case 'disabled':
       return null;
     case 'loading':
-      return <span className="muted small">…</span>;
+      return <span className="muted small account-loading">…</span>;
     case 'guest':
       return (
         <>
-          <button type="button" className="btn" onClick={() => setSigningIn(true)}>
+          <button type="button" className="btn btn-primary btn-block" onClick={() => setSigningIn(true)}>
             Sign in
           </button>
           {signingIn && <SignInDialog onClose={() => setSigningIn(false)} />}
@@ -29,7 +29,7 @@ export function AccountMenu() {
     case 'needsUsername':
       return (
         <>
-          <button type="button" className="btn" onClick={signOut}>
+          <button type="button" className="btn btn-block" onClick={signOut}>
             Sign out
           </button>
           <UsernameDialog email={state.email} onSignOut={signOut} />
@@ -38,10 +38,13 @@ export function AccountMenu() {
     case 'signedIn':
       return (
         <div className="account-chip">
-          <span className="account-name" title={state.email ?? undefined}>
-            @{state.account.username}
+          <span className="avatar" aria-hidden>
+            {state.account.username[0].toUpperCase()}
           </span>
-          <button type="button" className="btn" onClick={signOut}>
+          <span className="account-name" title={state.email ?? undefined}>
+            {state.account.username}
+          </span>
+          <button type="button" className="btn btn-ghost btn-small account-signout" onClick={signOut}>
             Sign out
           </button>
         </div>

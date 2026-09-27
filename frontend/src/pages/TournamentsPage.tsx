@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useGameClient } from '../data/ClientContext';
 import { useToasts } from '../components/Toasts';
 import { SignInDialog } from '../components/AccountMenu';
+import { TrophyIcon } from '../components/icons';
 import { errorText, fmtDate } from '../format';
 
 const PLAYER_OPTIONS = Array.from(
@@ -37,29 +38,37 @@ export function TournamentsPage() {
     : [];
 
   return (
-    <div className="tournaments">
-      <CreateTournamentPanel />
-      <section className="panel tournament-lists">
-        <h2>Tournaments</h2>
-        {error && <p className="error-text">{error}</p>}
-        {!list && !error && <p className="muted">Loading…</p>}
-        {groups.map((g) => (
-          <div key={g.title} className="tournament-group">
-            <h3>{g.title}</h3>
-            {g.items.length === 0 ? (
-              <p className="muted small">{g.empty}</p>
-            ) : (
-              <ul className="game-list">
-                {g.items.map((t) => (
-                  <li key={t.tournamentId}>
-                    <TournamentRow t={t} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-      </section>
+    <div className="page">
+      <header className="page-head">
+        <h1>
+          <TrophyIcon size={30} /> Tournaments
+        </h1>
+        <p className="muted">Knockout brackets for clubs and friends. Every game in a tournament gets a full review.</p>
+      </header>
+      <div className="tournaments">
+        <CreateTournamentPanel />
+        <section className="panel tournament-lists">
+          <h2>All tournaments</h2>
+          {error && <p className="error-text">{error}</p>}
+          {!list && !error && <p className="muted">Loading…</p>}
+          {groups.map((g) => (
+            <div key={g.title} className="tournament-group">
+              <h3>{g.title}</h3>
+              {g.items.length === 0 ? (
+                <p className="muted small">{g.empty}</p>
+              ) : (
+                <ul className="game-list">
+                  {g.items.map((t) => (
+                    <li key={t.tournamentId}>
+                      <TournamentRow t={t} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </section>
+      </div>
     </div>
   );
 }
@@ -107,7 +116,7 @@ function CreateTournamentPanel() {
 
   return (
     <section className="panel tournament-create">
-      <h1>Run a tournament</h1>
+      <h2>Run a tournament</h2>
       <p className="muted">
         Single elimination for 2–{MAX_TOURNAMENT_PLAYERS} players. You organize: start it when enough players have
         joined, and forfeit anyone who doesn't show. Join your own tournament if you want to play in it too.

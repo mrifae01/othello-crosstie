@@ -85,11 +85,13 @@ export function TournamentPage() {
     return (
       <div className="panel center">
         <h2>{loadError}</h2>
-        <Link to="/tournaments">All tournaments</Link>
+        <Link to="/tournaments" className="btn">
+          All tournaments
+        </Link>
       </div>
     );
   }
-  if (!t) return <p className="muted center">Loading…</p>;
+  if (!t) return <p className="muted center page">Loading…</p>;
 
   const me = auth.account;
   const isOrganizer = me?.id === t.organizer.accountId;
@@ -97,7 +99,7 @@ export function TournamentPage() {
   const full = t.entrantCount >= t.maxPlayers;
 
   return (
-    <div className="tournament">
+    <div className="page tournament">
       <section className="panel tournament-head">
         <div>
           <h1>{t.name}</h1>

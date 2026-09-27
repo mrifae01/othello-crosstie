@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { AnalysisResult, Player, PlayerAnalysisSummary, PlyAnalysis } from '@othello/shared';
-import { squareToAlg } from '@othello/shared';
+import { countDiscs, squareToAlg } from '@othello/shared';
 import { useGameClient } from '../data/ClientContext';
 import { isGameClientError } from '../data/GameClient';
 import { AnalysisBar } from '../components/AnalysisBar';
 import { Board } from '../components/Board';
 import { EvalGraph } from '../components/EvalGraph';
 import { MoveList } from '../components/MoveList';
+import { PlayerBar } from '../components/PlayerBar';
+import { EvalBar } from '../components/EvalBar';
+import { CoachBubble } from '../components/CoachBubble';
+import { ChevronLeftIcon, ChevronRightIcon, FirstIcon, LastIcon, ReviewIcon } from '../components/icons';
 import { CLASS_LABEL, CLASS_ORDER, MOTIF_LABEL, colorName, errorText, fmtEval, resultText } from '../format';
 
 export function ReviewPage() {
@@ -81,7 +85,9 @@ function ReviewLoader({ gameId }: { gameId: string }) {
   if (result.status !== 'done' || !result.summary) {
     return (
       <div className="panel center review-pending">
-        <h2>Game review</h2>
+        <h2>
+          <ReviewIcon size={22} /> Game Review
+        </h2>
         <p>
           {result.game.players.B.name} vs {result.game.players.W?.name ?? '…'}
           {result.game.status === 'finished' && <> · {resultText(result.game)}</>}
@@ -145,63 +151,70 @@ function ReviewBody({ result, summary }: ReviewBodyProps) {
   const board = ply ? ply.boardBefore : plies[n - 1].boardAfter;
   const prevPlaced = [...plies.slice(0, cursor)].reverse().find((p) => p.square !== null)?.square ?? null;
 
-  return (
-    <div className="review">
-      <header className="review-head panel">
-        <div>
-          <h2>Game review</h2>
-          <p className="muted">
-            {game.players.B.name} (Black) vs {game.players.W?.name ?? '?'} (White) · {resultText(game)}
-          </p>
-        </div>
-        <Link to={`/game/${game.gameId}`} className="btn">
-          View game
-        </Link>
-      </header>
+  const counts = countDiscs(board);
+  const evalNow = ply ? ply.evalBefore : plies[n - 1].evalAfter;
 
-      <div className="review-layout">
-        <section className="board-col">
+  return (
+    <div className="stage stage-review">
+      <section className="stage-board">
+        <PlayerBar color="W" info={game.players.W} count={counts.W} toMove={ply?.player === 'W'} />
+        <div className="board-with-eval">
+          <EvalBar value={evalNow} />
           <Board
             board={board}
             lastMove={prevPlaced}
             bestSquare={ply?.bestSquare ?? null}
             ghost={ply && ply.square !== null ? { square: ply.square, player: ply.player, tone: ply.classification } : null}
           />
-          <div className="stepper">
-            <button type="button" className="btn" onClick={() => go(0)} disabled={cursor === 0} title="Start (Home)">
-              ⏮
-            </button>
-            <button type="button" className="btn" onClick={() => go(cursor - 1)} disabled={cursor === 0} title="Previous (←)">
-              ◀
-            </button>
-            <span className="stepper-pos">
-              {cursor === 0 ? 'Start' : `After ply ${cursor}`} <span className="muted">/ {n}</span>
-            </span>
-            <button type="button" className="btn" onClick={() => go(cursor + 1)} disabled={cursor === n} title="Next (→)">
-              ▶
-            </button>
-            <button type="button" className="btn" onClick={() => go(n)} disabled={cursor === n} title="End (End)">
-              ⏭
-            </button>
-          </div>
-          <p className="muted small center">Use ← / → to step. The ring marks the engine's best move.</p>
-        </section>
+        </div>
+        <PlayerBar color="B" info={game.players.B} count={counts.B} toMove={ply?.player === 'B'} />
+      </section>
 
-        <aside className="side-col">
-          <div className="panel">
-            <EvalGraph plies={plies} cursor={cursor} onSelect={go} />
-          </div>
-          <div className="panel">{ply ? <PlyCard ply={ply} result={result} /> : <FinalCard result={result} />}</div>
+      <aside className="stage-panel">
+        <header className="panel-head">
+          <ReviewIcon size={22} /> Game Review
+          <Link to={`/game/${game.gameId}`} className="btn btn-ghost btn-small panel-head-action">
+            View game
+          </Link>
+        </header>
+
+        <div className="panel-body">
+          <p className="muted small review-result">{resultText(game)}</p>
+          <CoachBubble ply={ply} summary={`${resultText(game)}. Step back through the moves to see where it turned.`} />
+
           <div className="summary-cards">
             <SummaryCard result={result} player="B" s={summary.B} />
             <SummaryCard result={result} player="W" s={summary.W} />
           </div>
-          <div className="panel">
-            <h3>Moves</h3>
+
+          <EvalGraph plies={plies} cursor={cursor} onSelect={go} />
+
+          <div className="panel-card">{ply ? <PlyCard ply={ply} result={result} /> : <FinalCard result={result} />}</div>
+
+          <div>
+            <h3 className="section-label">Moves</h3>
             <MoveList moves={plies} currentPly={ply ? ply.ply : null} onSelect={(p) => go(p - 1)} />
           </div>
-        </aside>
-      </div>
+        </div>
+
+        <footer className="panel-foot stepper">
+          <button type="button" className="btn" onClick={() => go(0)} disabled={cursor === 0} title="Start (Home)" aria-label="Start">
+            <FirstIcon />
+          </button>
+          <button type="button" className="btn" onClick={() => go(cursor - 1)} disabled={cursor === 0} title="Previous (←)" aria-label="Previous">
+            <ChevronLeftIcon />
+          </button>
+          <span className="stepper-pos">
+            {cursor === 0 ? 'Start' : `Ply ${cursor}`} <span className="muted">/ {n}</span>
+          </span>
+          <button type="button" className="btn" onClick={() => go(cursor + 1)} disabled={cursor === n} title="Next (→)" aria-label="Next">
+            <ChevronRightIcon />
+          </button>
+          <button type="button" className="btn" onClick={() => go(n)} disabled={cursor === n} title="End (End)" aria-label="End">
+            <LastIcon />
+          </button>
+        </footer>
+      </aside>
     </div>
   );
 }
@@ -298,7 +311,7 @@ function FinalCard({ result }: { result: AnalysisResult }) {
 function SummaryCard({ result, player, s }: { result: AnalysisResult; player: Player; s: PlayerAnalysisSummary }) {
   const name = result.game.players[player]?.name ?? colorName(player);
   return (
-    <div className="panel summary-card">
+    <div className="summary-card">
       <div className="summary-head">
         <span className={`disc disc-${player} mini`} />
         <span className="player-name">{name}</span>
