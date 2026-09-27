@@ -4,6 +4,8 @@ import { AccountMenu } from './components/AccountMenu';
 import { HomePage } from './pages/HomePage';
 import { GamePage } from './pages/GamePage';
 import { ReviewPage } from './pages/ReviewPage';
+import { TournamentsPage } from './pages/TournamentsPage';
+import { TournamentPage } from './pages/TournamentPage';
 
 export function App() {
   const { pathname } = useLocation();
@@ -39,7 +41,12 @@ export function App() {
           </Link>
           <span className="tagline">Play a friend, then see where the game turned.</span>
         </div>
-        <div className="topbar-side">
+        <div className="topbar-side topbar-right">
+          {pathname !== '/tournaments' && (
+            <button type="button" className="btn" onClick={() => leave(() => navigate('/tournaments'))}>
+              Tournaments
+            </button>
+          )}
           <AccountMenu />
         </div>
       </header>
@@ -48,6 +55,8 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/game/:id" element={<GamePage />} />
           <Route path="/game/:id/analysis" element={<ReviewPage />} />
+          <Route path="/tournaments" element={<TournamentsPage />} />
+          <Route path="/tournaments/:id" element={<TournamentPage />} />
           <Route
             path="*"
             element={

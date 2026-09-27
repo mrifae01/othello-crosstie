@@ -25,7 +25,8 @@ export interface GameRecord {
   whiteName: string | null;
   blackAccountId: string | null;
   whiteAccountId: string | null;
-  blackTokenHash: string;
+  /** null only for a tournament seat its player hasn't claimed yet (see setSeatTokenHash). */
+  blackTokenHash: string | null;
   whiteTokenHash: string | null;
   board: Board;
   turn: Player | null;
@@ -62,7 +63,7 @@ interface GameRow {
   white_name: string | null;
   black_account_id: string | null;
   white_account_id: string | null;
-  black_token_hash: string;
+  black_token_hash: string | null;
   white_token_hash: string | null;
   board: string;
   turn: Player | null;
@@ -143,6 +144,25 @@ export async function joinGame(id: string, white: SeatHolder, whiteTokenHash: st
     [id, white.name, white.accountId, whiteTokenHash],
   );
   return rows[0] ? toRecord(rows[0], []) : null;
+}
+
+/**
+ * A tournament game, inside the caller's transaction: both seats belong to accounts and the game
+ * starts active, but neither seat has a token until its player claims it.
+ */
+export async function insertTournamentGame(client: pg.PoolClient, black: SeatHolder, white: SeatHolder): Promise<string> {
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO games (status, black_name, black_account_id, white_name, white_account_id, board, turn, started_at)
+     VALUES ('active', $1, $2, $3, $4, $5, 'B', now()) RETURNING id`,
+    [black.name, black.accountId, white.name, white.accountId, boardToString(initialBoard())],
+  );
+  return rows[0].id;
+}
+
+/** Sets (or rotates) one seat's token hash. */
+export async function setSeatTokenHash(id: string, seat: Player, tokenHash: string): Promise<void> {
+  const column = seat === 'B' ? 'black_token_hash' : 'white_token_hash';
+  await pool.query(`UPDATE games SET ${column} = $2 WHERE id = $1`, [id, tokenHash]);
 }
 
 export async function loadGame(id: string): Promise<GameRecord | null> {

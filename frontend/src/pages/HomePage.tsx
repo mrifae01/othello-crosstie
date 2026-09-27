@@ -121,6 +121,7 @@ function shortResult(g: GameSummary): string {
   if (g.winner === 'draw') return `Draw ${g.counts.B}–${g.counts.W}`;
   const name = g.players[g.winner]?.name ?? (g.winner === 'B' ? 'Black' : 'White');
   if (g.endReason === 'resign') return `${name} won by resignation`;
+  if (g.endReason === 'forfeit') return `${name} won by forfeit`;
   const loser = g.winner === 'B' ? 'W' : 'B';
   return `${name} won ${g.counts[g.winner]}–${g.counts[loser]}`;
 }

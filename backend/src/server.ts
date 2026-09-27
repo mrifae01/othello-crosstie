@@ -8,6 +8,7 @@ import { pool } from './db/pool';
 import { GameService } from './game/GameService';
 import { apiRouter } from './http/routes';
 import { AnalysisRunner } from './analysis/AnalysisRunner';
+import { TournamentService } from './tournament/TournamentService';
 import { registerSocketHandlers, roomFor } from './socket/handlers';
 
 /**
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
     cors: WEB_ORIGINS.length ? { origin: WEB_ORIGINS } : undefined,
   });
   registerSocketHandlers(io, games);
+  const tournaments = new TournamentService(games);
 
   const analysis = new AnalysisRunner(games, {
     progress: (p) => io.to(roomFor(p.gameId)).emit('analysis:progress', p),
@@ -48,12 +50,14 @@ async function main(): Promise<void> {
   });
 
   app.disable('x-powered-by');
-  app.use('/api', allowWebOrigins, apiRouter(games, analysis));
+  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments));
 
   httpServer.listen(PORT, () => console.log(`[api] listening on http://localhost:${PORT}`));
 
   const requeued = await analysis.requeueOnBoot();
   if (requeued > 0) console.log(`[analysis] re-queued ${requeued} game(s) from a previous run`);
+  const reconciled = await tournaments.reconcileOnBoot();
+  if (reconciled > 0) console.log(`[tournament] recorded ${reconciled} result(s) from a previous run`);
 
   const shutdown = () => {
     analysis.stop();

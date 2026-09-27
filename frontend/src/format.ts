@@ -18,6 +18,10 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   BAD_TOKEN: "You don't hold a seat in this game.",
   UNAUTHORIZED: 'Your session has expired. Sign in again.',
   USERNAME_TAKEN: 'That username is taken.',
+  FORBIDDEN: "You're not allowed to do that.",
+  TOURNAMENT_NOT_FOUND: 'Tournament not found.',
+  TOURNAMENT_FULL: 'This tournament is full.',
+  TOURNAMENT_NOT_OPEN: "That can't be done at this stage of the tournament.",
   INTERNAL: 'Something went wrong on the server. Try again.',
 };
 
@@ -31,7 +35,12 @@ export function resultText(game: GameSummary): string {
   if (game.status !== 'finished' || !game.winner) return '';
   if (game.winner === 'draw') return `Draw, ${game.counts.B}–${game.counts.W}`;
   const loser = game.winner === 'B' ? 'W' : 'B';
-  const how = game.endReason === 'resign' ? 'by resignation' : `${game.counts[game.winner]}–${game.counts[loser]}`;
+  const how =
+    game.endReason === 'resign'
+      ? 'by resignation'
+      : game.endReason === 'forfeit'
+        ? 'by forfeit'
+        : `${game.counts[game.winner]}–${game.counts[loser]}`;
   return `${playerLabel(game, game.winner)} wins ${how}`;
 }
 

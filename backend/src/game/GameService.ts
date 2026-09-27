@@ -150,7 +150,7 @@ export class GameService {
   private seatFor(g: GameRecord, token: unknown): Player | null {
     if (typeof token !== 'string' || token.length === 0) return null;
     const h = hashToken(token);
-    if (sameHash(h, g.blackTokenHash)) return 'B';
+    if (g.blackTokenHash && sameHash(h, g.blackTokenHash)) return 'B';
     if (g.whiteTokenHash && sameHash(h, g.whiteTokenHash)) return 'W';
     return null;
   }
@@ -266,6 +266,47 @@ export class GameService {
       }
       Object.assign(g, snapshot);
       afterPersist?.();
+      this.emit(g);
+      return toGameState(g);
+    });
+  }
+
+  /**
+   * Issues a fresh seat token to the account that owns a seat (tournament games are created with
+   * accounts assigned but no tokens). Rotates any earlier token, so the newest device wins the seat.
+   */
+  async claimSeat(gameId: string, accountId: string): Promise<{ gameId: string; color: Player; playerToken: string }> {
+    return this.withLock(gameId, async () => {
+      const g = await this.mustLoad(gameId);
+      const color: Player | null =
+        g.blackAccountId === accountId ? 'B' : g.whiteAccountId === accountId ? 'W' : null;
+      if (!color) throw new GameError('BAD_TOKEN', 'Your account does not hold a seat in this game');
+      if (g.status !== 'active') throw new GameError('GAME_NOT_ACTIVE', 'Game is not active');
+      const playerToken = newToken();
+      const hash = hashToken(playerToken);
+      await repo.setSeatTokenHash(gameId, color, hash);
+      if (color === 'B') g.blackTokenHash = hash;
+      else g.whiteTokenHash = hash;
+      return { gameId, color, playerToken };
+    });
+  }
+
+  /** Ends an active game against `loser` without their token (a tournament organizer's no-show call). */
+  async forfeit(gameId: string, loser: Player): Promise<GameState> {
+    return this.withLock(gameId, async () => {
+      const g = await this.mustLoad(gameId);
+      if (g.status !== 'active') throw new GameError('GAME_NOT_ACTIVE', 'Game is not active');
+      const snapshot: GameSnapshotUpdate = {
+        ...snapshotOf(g),
+        status: 'finished',
+        turn: null,
+        winner: opponent(loser),
+        endReason: 'forfeit',
+        analysisStatus: g.moves.length > 0 ? 'pending' : 'none',
+        finishedAt: new Date(),
+      };
+      await repo.updateGame(gameId, snapshot);
+      Object.assign(g, snapshot);
       this.emit(g);
       return toGameState(g);
     });

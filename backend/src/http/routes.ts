@@ -6,14 +6,20 @@ import type {
   GameState,
   GameStatus,
   ListGamesResponse,
+  ForfeitRequest,
+  ListTournamentsResponse,
   MeResponse,
   SeatResponse,
+  TournamentDetail,
+  TournamentStatus,
 } from '@othello/shared';
+import { MAX_TOURNAMENT_PLAYERS, MIN_TOURNAMENT_PLAYERS, type Account } from '@othello/shared';
 import { listGames, pingDb, type SeatHolder } from '../db/gamesRepo';
 import { getAccount, upsertAccount } from '../db/accountsRepo';
 import { authEnabled, verifyAccessToken, type AuthUser } from '../auth/verifyToken';
 import type { AnalysisRunner } from '../analysis/AnalysisRunner';
 import { GameError, toGameSummary, type GameService } from '../game/GameService';
+import type { TournamentService } from '../tournament/TournamentService';
 
 const STATUS_FOR: Record<ErrorCode, number> = {
   BAD_REQUEST: 400,
@@ -25,10 +31,15 @@ const STATUS_FOR: Record<ErrorCode, number> = {
   BAD_TOKEN: 403,
   UNAUTHORIZED: 401,
   USERNAME_TAKEN: 409,
+  FORBIDDEN: 403,
+  TOURNAMENT_NOT_FOUND: 404,
+  TOURNAMENT_FULL: 409,
+  TOURNAMENT_NOT_OPEN: 409,
   INTERNAL: 500,
 };
 
 const GAME_STATUSES: readonly GameStatus[] = ['waiting', 'active', 'finished'];
+const TOURNAMENT_STATUSES: readonly TournamentStatus[] = ['registering', 'active', 'finished'];
 
 function sendError(res: Response, code: ErrorCode, message: string): void {
   const body: ApiError = { error: { code, message } };
@@ -96,10 +107,44 @@ async function seatHolderFor(req: Request): Promise<SeatHolder> {
   return { name: parseName(req.body), accountId: null };
 }
 
+/** Signed in with a claimed username: required for everything tournament-side. */
+async function requireAccount(req: Request): Promise<Account> {
+  const user = await requireUser(req);
+  const account = await getAccount(user.userId);
+  if (!account) throw new GameError('UNAUTHORIZED', 'Pick a username first');
+  return account;
+}
+
+function parseTournamentName(body: unknown): string {
+  const raw = (body as { name?: unknown } | null)?.name;
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  const len = [...name].length;
+  if (len < 1 || len > 40) throw new GameError('BAD_REQUEST', '`name` must be 1–40 characters after trimming');
+  return name;
+}
+
+function parseMaxPlayers(body: unknown): number {
+  const raw = (body as { maxPlayers?: unknown } | null)?.maxPlayers;
+  if (raw === undefined) return MAX_TOURNAMENT_PLAYERS;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < MIN_TOURNAMENT_PLAYERS || raw > MAX_TOURNAMENT_PLAYERS) {
+    throw new GameError('BAD_REQUEST', `\`maxPlayers\` must be an integer ${MIN_TOURNAMENT_PLAYERS}–${MAX_TOURNAMENT_PLAYERS}`);
+  }
+  return raw;
+}
+
+function parseMatchRef(params: Record<string, string>): { round: number; slot: number } {
+  const round = Number(params.round);
+  const slot = Number(params.slot);
+  if (!Number.isInteger(round) || round < 1 || !Number.isInteger(slot) || slot < 0) {
+    throw new GameError('BAD_REQUEST', 'Bad match reference');
+  }
+  return { round, slot };
+}
+
 type Handler = (req: Request, res: Response) => Promise<void>;
 const wrap = (h: Handler) => (req: Request, res: Response, next: NextFunction) => h(req, res).catch(next);
 
-export function apiRouter(games: GameService, analysis: AnalysisRunner): express.Router {
+export function apiRouter(games: GameService, analysis: AnalysisRunner, tournaments: TournamentService): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: '10kb' }));
 
@@ -126,6 +171,13 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner): express
     }
     const rows = await listGames({ status: status as GameStatus | undefined, limit: parseLimit(limit) });
     const body: ListGamesResponse = { games: rows.map(toGameSummary) };
+    res.json(body);
+  }));
+
+  /** Seat token for the caller's account in a game it was seated in by account (tournament games). */
+  r.post('/games/:id/seat', wrap(async (req, res) => {
+    const account = await requireAccount(req);
+    const body: SeatResponse = await games.claimSeat(req.params.id, account.id);
     res.json(body);
   }));
 
@@ -160,6 +212,53 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner): express
     const user = await requireUser(req);
     const rows = await listGames({ status: 'finished', accountId: user.userId, limit: parseLimit(req.query.limit) });
     const body: ListGamesResponse = { games: rows.map(toGameSummary) };
+    res.json(body);
+  }));
+
+  // ---------- tournaments (reads public, writes need an account) ----------
+
+  r.get('/tournaments', wrap(async (req, res) => {
+    const { status, limit } = req.query;
+    if (status !== undefined && !TOURNAMENT_STATUSES.includes(status as TournamentStatus)) {
+      throw new GameError('BAD_REQUEST', '`status` must be one of registering, active, finished');
+    }
+    const list = await tournaments.list({ status: status as TournamentStatus | undefined, limit: parseLimit(limit) });
+    const body: ListTournamentsResponse = { tournaments: list };
+    res.json(body);
+  }));
+
+  r.post('/tournaments', wrap(async (req, res) => {
+    const account = await requireAccount(req);
+    const body: TournamentDetail = await tournaments.create(account, parseTournamentName(req.body), parseMaxPlayers(req.body));
+    res.status(201).json(body);
+  }));
+
+  r.get('/tournaments/:id', wrap(async (req, res) => {
+    const body: TournamentDetail = await tournaments.get(req.params.id);
+    res.json(body);
+  }));
+
+  r.post('/tournaments/:id/join', wrap(async (req, res) => {
+    const body: TournamentDetail = await tournaments.join(req.params.id, await requireAccount(req));
+    res.json(body);
+  }));
+
+  r.post('/tournaments/:id/leave', wrap(async (req, res) => {
+    const body: TournamentDetail = await tournaments.leave(req.params.id, await requireAccount(req));
+    res.json(body);
+  }));
+
+  r.post('/tournaments/:id/start', wrap(async (req, res) => {
+    const body: TournamentDetail = await tournaments.start(req.params.id, await requireAccount(req));
+    res.json(body);
+  }));
+
+  r.post('/tournaments/:id/matches/:round/:slot/forfeit', wrap(async (req, res) => {
+    const account = await requireAccount(req);
+    const { round, slot } = parseMatchRef(req.params);
+    const loser = (req.body as Partial<ForfeitRequest> | null)?.loser;
+    if (loser !== 'B' && loser !== 'W') throw new GameError('BAD_REQUEST', "`loser` must be 'B' or 'W'");
+    const body: TournamentDetail = await tournaments.forfeit(req.params.id, account, round, slot, loser);
     res.json(body);
   }));
 

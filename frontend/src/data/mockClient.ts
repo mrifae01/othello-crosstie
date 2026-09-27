@@ -243,6 +243,31 @@ export function createMockClient(): MockClient {
     async listMyGames() {
       return [];
     },
+    // Tournaments need accounts, so mock mode shows an empty list and refuses writes.
+    async listTournaments() {
+      return [];
+    },
+    async getTournament() {
+      throw new GameClientError('TOURNAMENT_NOT_FOUND', 'Tournaments are not available in mock mode');
+    },
+    async createTournament() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
+    async joinTournament() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
+    async leaveTournament() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
+    async startTournament() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
+    async forfeitMatch() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
+    async claimSeat() {
+      throw new GameClientError('UNAUTHORIZED', 'Accounts are not available in mock mode');
+    },
   };
 
   return client;

@@ -14,10 +14,12 @@ import type {
   ErrorCode,
   GameState,
   ListGamesResponse,
+  ListTournamentsResponse,
   MeResponse,
   SeatResponse,
   ServerToClientEvents,
   SubscribeResult,
+  TournamentDetail,
 } from '@othello/shared';
 import { GameClientError, type GameClient, type GameEventHandlers, type GameSubscription } from './GameClient';
 
@@ -142,6 +144,17 @@ export function createHttpClient(getAccessToken: AccessTokenProvider = async () 
     getMe: async (): Promise<Account | null> => (await call<MeResponse>('GET', '/me')).account,
     claimUsername: async (username) => (await call<MeResponse>('PUT', '/me', { username })).account!,
     listMyGames: async (limit = 20) => (await call<ListGamesResponse>('GET', `/me/games?limit=${limit}`)).games,
+
+    listTournaments: async (status, limit = 30) =>
+      (await call<ListTournamentsResponse>('GET', `/tournaments?limit=${limit}${status ? `&status=${status}` : ''}`)).tournaments,
+    getTournament: (id) => call<TournamentDetail>('GET', `/tournaments/${encodeURIComponent(id)}`),
+    createTournament: (name, maxPlayers) => call<TournamentDetail>('POST', '/tournaments', { name, maxPlayers }),
+    joinTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/join`),
+    leaveTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/leave`),
+    startTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/start`),
+    forfeitMatch: (id, round, slot, loser) =>
+      call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/matches/${round}/${slot}/forfeit`, { loser }),
+    claimSeat: (gameId) => call<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/seat`),
 
     async subscribe(gameId, playerToken, handlers): Promise<GameSubscription> {
       const s = getSocket();

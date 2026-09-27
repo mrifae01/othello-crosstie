@@ -35,7 +35,8 @@ export interface PlayedMove extends Move {
 
 export type GameStatus = 'waiting' | 'active' | 'finished';
 export type Winner = Player | 'draw';
-export type EndReason = 'normal' | 'resign';
+/** 'forfeit': a tournament organizer ended the game against a player who didn't show. */
+export type EndReason = 'normal' | 'resign' | 'forfeit';
 export type AnalysisStatus = 'none' | 'pending' | 'running' | 'done' | 'failed';
 
 export interface PlayerInfo {
@@ -153,6 +154,10 @@ export type ErrorCode =
   | 'BAD_TOKEN'
   | 'UNAUTHORIZED'     // missing/invalid/expired access token on an account endpoint
   | 'USERNAME_TAKEN'
+  | 'FORBIDDEN'            // signed in, but not allowed (e.g. not the tournament's organizer)
+  | 'TOURNAMENT_NOT_FOUND'
+  | 'TOURNAMENT_FULL'
+  | 'TOURNAMENT_NOT_OPEN'  // the action doesn't fit the tournament's current status
   | 'INTERNAL';
 
 /** Body of every non-2xx REST response. */
@@ -193,6 +198,76 @@ export interface MeResponse {
 
 /** PUT /api/me: claim (or change) the username. */
 export interface ClaimUsernameRequest { username: string }
+
+// ---------- Tournaments ----------
+// Single elimination, 2..8 players, accounts only. Reads are public; every write needs an
+// account with a claimed username. Bracket math lives in bracket.ts.
+
+export type TournamentStatus = 'registering' | 'active' | 'finished';
+
+export interface TournamentPlayer {
+  accountId: string;
+  username: string;
+}
+
+export interface TournamentSummary {
+  tournamentId: string;
+  name: string;                 // trimmed, 1..40 chars
+  status: TournamentStatus;
+  /** Runs the tournament (starts it, forfeits no-shows). Not a player unless they also entered. */
+  organizer: TournamentPlayer;
+  maxPlayers: number;           // 2..8
+  entrantCount: number;
+  winner: TournamentPlayer | null;  // non-null iff status === 'finished'
+  createdAt: string;            // ISO 8601
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface TournamentEntrant extends TournamentPlayer {
+  /** 1 = top seed. Assigned (randomly) on start; null while registering. */
+  seed: number | null;
+}
+
+/**
+ * 'pending': waiting on a player from an earlier match. 'playing': game created.
+ * 'decided': has a winner (a round-1 match against an empty slot is a bye, decided with no game).
+ */
+export type MatchStatus = 'pending' | 'playing' | 'decided';
+
+export interface TournamentMatch {
+  round: number;                // 1-based; round === rounds is the final
+  slot: number;                 // 0-based within the round, top to bottom
+  status: MatchStatus;
+  /** The upper slot's player takes Black. A drawn game goes to White. */
+  black: TournamentPlayer | null;
+  white: TournamentPlayer | null;
+  gameId: string | null;
+  winner: TournamentPlayer | null;
+}
+
+export interface TournamentDetail extends TournamentSummary {
+  entrants: TournamentEntrant[]; // join order while registering, seed order once started
+  /** log2(bracket size); 0 while registering. */
+  rounds: number;
+  /** Every match of every round (empty while registering), ordered by round then slot. */
+  matches: TournamentMatch[];
+}
+
+export interface ListTournamentsResponse {
+  tournaments: TournamentSummary[];
+}
+
+/** POST /api/tournaments */
+export interface CreateTournamentRequest {
+  name: string;
+  maxPlayers?: number;          // default 8
+}
+
+/** POST /api/tournaments/:id/matches/:round/:slot/forfeit (organizer only) */
+export interface ForfeitRequest {
+  loser: Player;
+}
 
 // ---------- Socket.IO ----------
 

@@ -16,6 +16,9 @@ import type {
   Player,
   SeatResponse,
   Square,
+  TournamentDetail,
+  TournamentStatus,
+  TournamentSummary,
 } from '@othello/shared';
 
 /** Every failure from a GameClient is one of these, whether it came from REST (ApiError) or a socket ack. */
@@ -79,4 +82,21 @@ export interface GameClient {
   claimUsername(username: string): Promise<Account>;
   /** GET /api/me/games: the signed-in account's finished games, newest first. */
   listMyGames(limit?: number): Promise<GameSummary[]>;
+
+  // ---- Tournaments (reads work for guests; writes need a signed-in account) ----
+
+  /** GET /api/tournaments?status=&limit=, newest first. */
+  listTournaments(status?: TournamentStatus, limit?: number): Promise<TournamentSummary[]>;
+  /** GET /api/tournaments/:id */
+  getTournament(id: string): Promise<TournamentDetail>;
+  /** POST /api/tournaments. The creator organizes; they play only if they also join. */
+  createTournament(name: string, maxPlayers: number): Promise<TournamentDetail>;
+  joinTournament(id: string): Promise<TournamentDetail>;
+  leaveTournament(id: string): Promise<TournamentDetail>;
+  /** Organizer only. */
+  startTournament(id: string): Promise<TournamentDetail>;
+  /** Organizer only: the `loser` seat forfeits the match's game. */
+  forfeitMatch(id: string, round: number, slot: number, loser: Player): Promise<TournamentDetail>;
+  /** POST /api/games/:id/seat: a seat token for the signed-in account's seat (tournament games). */
+  claimSeat(gameId: string): Promise<SeatResponse>;
 }
