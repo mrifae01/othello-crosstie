@@ -48,4 +48,4 @@ There is no "Continue" button. The bot replies on its own, after a delay chosen 
 
 ### Where the LLM fits (and where it doesn't)
 
-Grades come from the engine only, and there is no LLM call per move. Per-move LLM calls would add seconds of delay and a cost to every move, and instant grades are the core experience. An on-demand **Explain why** button, shown disabled for now, is the planned optional deeper layer. Its design is in the [roadmap](roadmap.md#llm-explain-why-in-practice).
+Grades come from the engine only, and there is no LLM call per move. Per-move LLM calls would add seconds of delay and a cost to every move, and instant grades are the core experience. The optional deeper layer is the on-demand **Explain why** button. It calls `POST /api/coach/explain`, where the server replays the moves, grades the move itself, and has Claude explain the engine's facts, with the same grounding check as the Review debrief. The button is hidden when no API key is set.
