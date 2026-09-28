@@ -156,3 +156,24 @@ export const CheckIcon = (p: IconProps) => (
     <path d="m5 12 5 5 9-10" />
   </Icon>
 );
+
+export const UndoIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </Icon>
+);
+
+export const RedoIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+  </Icon>
+);
+
+export const BulbIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 18h6M10 21h4" />
+    <path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3Z" />
+  </Icon>
+);

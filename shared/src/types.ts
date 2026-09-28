@@ -191,6 +191,34 @@ export interface CoachDebriefRequest {
   player: Player;
 }
 
+/** GET /api/coach: whether the AI coach can write anything right now (no API key, or paused after failures). */
+export interface CoachStatusResponse {
+  enabled: boolean;
+}
+
+/**
+ * POST /api/coach/explain (Practice "Explain why"). Practice games aren't saved, so the client
+ * sends the line; the server replays it (rejecting illegal lines), grades the move itself and
+ * explains that grade. Nothing but moves is taken from the client.
+ */
+export interface ExplainMoveRequest {
+  /** The game from the start, passes included, up to at least the explained move. */
+  moves: Move[];
+  /** 1-based ply of the move to explain; must be a move, not a pass. */
+  ply: number;
+}
+
+export interface ExplainMoveResponse {
+  /**
+   * The server's own grade of the move. It can differ from the client's near a class boundary
+   * (the search is time-budgeted, so depth depends on the machine); the explanation matches this one.
+   */
+  grade: PlyAnalysis;
+  /** Same shape as a debrief moment: title, explanation, lesson. */
+  explanation: CoachMoment;
+  model: string;
+}
+
 // ---------- REST DTOs ----------
 
 export type ErrorCode =
@@ -209,6 +237,7 @@ export type ErrorCode =
   | 'TOURNAMENT_NOT_OPEN'  // the action doesn't fit the tournament's current status
   | 'ANALYSIS_NOT_READY'   // the coach needs the engine analysis to be done first
   | 'COACH_UNAVAILABLE'    // no Claude API key configured, or the coach call failed
+  | 'RATE_LIMITED'         // too many requests from this client; try again shortly
   | 'INTERNAL';
 
 /** Body of every non-2xx REST response. */

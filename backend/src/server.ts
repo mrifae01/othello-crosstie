@@ -9,6 +9,7 @@ import { GameService } from './game/GameService';
 import { apiRouter } from './http/routes';
 import { AnalysisRunner } from './analysis/AnalysisRunner';
 import { CoachService } from './coach/CoachService';
+import { ExplainService } from './coach/ExplainService';
 import { TournamentService } from './tournament/TournamentService';
 import { registerSocketHandlers, roomFor } from './socket/handlers';
 
@@ -54,7 +55,10 @@ async function main(): Promise<void> {
   console.log(`[coach] ${coach.enabled ? 'AI coach enabled' : 'AI coach disabled (no ANTHROPIC_API_KEY)'}`);
 
   app.disable('x-powered-by');
-  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments, coach));
+  // One proxy hop in production (the host's load balancer), so req.ip is the real client for
+  // the coach's per-IP rate limit rather than the proxy's address.
+  app.set('trust proxy', 1);
+  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments, coach, new ExplainService(coach)));
 
   httpServer.listen(PORT, () => console.log(`[api] listening on http://localhost:${PORT}`));
 

@@ -85,6 +85,26 @@ The corner weight was raised from 8 to 12 because at 8 an obviously free corner 
 - Accuracy lands at 50–70% for random or first-legal-move play.
 - Neither "everything is a blunder" nor "nothing is" occurs.
 
+**Practice bot levels** (`BOT_LEVELS` in `shared/src/engine/bot.ts`). Each level searches with its own settings, then picks at random from its top `pool` moves that lose at most `maxLoss` discs against its own best move. The bot's search never affects grades: the coach always grades with `ANALYSIS_SEARCH_OPTIONS`.
+
+| Level | Search | Picks from |
+|---|---|---|
+| Easy | depth 2, `exactEmpties: 0` | top 4 moves losing ≤ 10 discs |
+| Medium | depth 4, `exactEmpties: 8` | top 2 moves losing ≤ 3 discs |
+| Hard | `ANALYSIS_SEARCH_OPTIONS` | its best move only |
+
+**Measured** (`npm run bot-match -w backend`, colors alternating, seed 1). The starting values met both targets, so none were changed:
+
+| Match | Games | Result | Avg margin |
+|---|---|---|---|
+| Medium vs Easy | 40 | Medium 39–1 | +40.4 |
+| Hard vs Easy | 20 | Hard 20–0 | +55.4 |
+| Hard vs Medium | 20 | Hard 19–1 | +36.4 |
+
+Easy is deliberately weak: a depth-2 search that often picks its third- or fourth-best move. Checked by hand, a player who always takes the first legal move still loses to it heavily, so Easy is weak but not trivial.
+
+**Practice reply delays** (`REPLY_DELAY_MS` in `shared/src/practice.ts`): 500 ms after a best, good or forced move, 1200 ms after an inaccuracy, and 2500 ms after a mistake or blunder. The delay starts only once the grade is on screen.
+
 ## Session 2: optional accounts (Supabase Auth)
 
 The contract cut accounts (§7.2) and planned them for Milestone 2 (§7.1). They were pulled forward because cross-game coaching and tournaments both need a stable identity. Guest play is unchanged.
@@ -125,3 +145,12 @@ The contract put tournaments in Milestone 3 (§7.1) as round-based Swiss. This b
 | T9 | Live updates | — | The tournament page polls every 5 seconds while a tournament isn't finished. There's no tournament socket room. | A bracket changes once per game, so polling is enough for now. |
 | T10 | Ending early | — | The organizer can end a tournament that is `registering` or `active` (`POST /api/tournaments/:id/cancel`). It becomes `cancelled`, with `finished_at` as the end time, and it is **never deleted**, so links keep working. The bracket freezes as it stood. Games still in progress are force-ended. From then on, late results, forfeits, joins and starts are all refused. On boot, the server force-ends any game left running by a crash between the cancel and the abort. | Organizers need a way out of a stalled or abandoned event. Keeping the record preserves every game already played. |
 | T11 | Finished games without a winner | `winner` is non-null iff `status === 'finished'` (§3) | One exception: `endReason: 'cancelled'`. A tournament game force-ended by cancellation is `finished` with `winner: null`. It is still analyzed if it has moves. The UI labels it "Tournament cancelled". | No one won, and inventing a result would be worse. Every consumer already tolerated a null winner. |
+
+## Session 3: Practice mode (play the bot with live coaching)
+
+| # | Area | What the contract says | What was built | Why |
+|---|---|---|---|---|
+| P1 | Rule authority | "Clients use `legalMoves` for hints; never compute rules client-side" (`GameState`) | Practice runs the shared engine in the browser: rules, the bot and grading, all in a Web Worker (`frontend/src/engine/engine.worker.ts`). Online games are unchanged: the server stays the authority for them. | Practice games are never saved and have no opponent to cheat, so there is nothing for a server to guard. Running locally keeps Practice free, instant and usable in mock mode. |
+| P2 | Grading | Grades come from the backend's `analyzeGame` | The per-move body of `analyzeGame` is now the exported `gradeMove(board, player, square, searchResult)`, and Practice calls it with the same `ANALYSIS_SEARCH_OPTIONS`. `analyzeGame` behaves exactly as before. | One definition of a grade: "mistake" means the same thing in Practice as in Review. |
+| P3 | Shared code | — | `shared/src/engine/bot.ts` (`BOT_LEVELS`, `chooseBotMove`, `seededRng`) and `shared/src/practice.ts` (the Practice reducer and `REPLY_DELAY_MS`). `types.ts` is unchanged. | Both are pure and unit tested; the bot also runs in the tuning script. |
+| P4 | Persistence | — | None. No endpoint, no table, no login. | Out of scope for this build; saving practice games for a skill profile is on the roadmap. |

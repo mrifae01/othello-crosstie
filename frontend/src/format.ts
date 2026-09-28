@@ -24,6 +24,7 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   TOURNAMENT_NOT_OPEN: "That can't be done at this stage of the tournament.",
   ANALYSIS_NOT_READY: 'The engine is still analyzing this game.',
   COACH_UNAVAILABLE: "The coach couldn't write this debrief right now. Try again in a moment.",
+  RATE_LIMITED: "You've asked the coach a lot in a short time. Try again in a few minutes.",
   INTERNAL: 'Something went wrong on the server. Try again.',
 };
 

@@ -5,5 +5,7 @@ export * from './engine/eval';
 export * from './engine/search';
 export * from './engine/analyze';
 export * from './engine/motifs';
+export * from './engine/bot';
 export * from './bracket';
 export * from './coach';
+export * from './practice';

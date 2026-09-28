@@ -12,7 +12,10 @@ import type {
   AnalysisResult,
   CoachDebrief,
   CoachDebriefResponse,
+  CoachStatusResponse,
   ErrorCode,
+  ExplainMoveRequest,
+  ExplainMoveResponse,
   GameState,
   GameSummary,
   Player,
@@ -82,6 +85,13 @@ export interface GameClient {
   getCoachDebrief(gameId: string, player: Player): Promise<CoachDebriefResponse>;
   /** POST /api/games/:id/coach. Generates on first call (can take ~10–30s). Fails with COACH_UNAVAILABLE or ANALYSIS_NOT_READY. */
   requestCoachDebrief(gameId: string, player: Player): Promise<CoachDebrief>;
+  /** GET /api/coach. Whether the AI coach can write anything right now. */
+  getCoachStatus(): Promise<CoachStatusResponse>;
+  /**
+   * POST /api/coach/explain (Practice). The server grades the move itself and explains that grade
+   * (a few seconds). Fails with COACH_UNAVAILABLE, RATE_LIMITED, or ILLEGAL_MOVE / BAD_REQUEST.
+   */
+  explainMove(req: ExplainMoveRequest): Promise<ExplainMoveResponse>;
 
   // ---- Accounts (only called while signed in; see auth/AuthContext) ----
 

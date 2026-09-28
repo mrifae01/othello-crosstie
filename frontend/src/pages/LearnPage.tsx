@@ -4,6 +4,7 @@ import type { Square } from '@othello/shared';
 import { squareToAlg } from '@othello/shared';
 import { Board } from '../components/Board';
 import { ComingSoon } from '../components/ComingSoon';
+import { PracticeLauncher } from '../components/PracticeLauncher';
 import { BookIcon, BotIcon, CheckIcon, LearnIcon, LockIcon, PuzzleIcon, SparkleIcon, TargetIcon } from '../components/icons';
 import { CORNER_PUZZLE, CORNER_PUZZLE_ANSWER, CORNER_PUZZLE_LEGAL } from '../content/diagrams';
 
@@ -97,17 +98,12 @@ export function LearnPage() {
           </ul>
         </LearnCard>
 
-        <LearnCard icon={BotIcon} title="Practice vs AI" badge={<ComingSoon />}>
+        <LearnCard icon={BotIcon} title="Practice vs AI">
           <p className="muted">
-            Play full games against the engine, or drill a single position from one of your reviews until you convert it.
+            Play the bot with a coach at your side: every move is graded as you play, and you can ask for a hint, see the
+            best move, or take a move back.
           </p>
-          <div className="level-grid">
-            {['Beginner', 'Casual', 'Club', 'Expert'].map((l) => (
-              <button key={l} type="button" className="btn" disabled>
-                {l}
-              </button>
-            ))}
-          </div>
+          <PracticeLauncher />
         </LearnCard>
       </div>
     </div>

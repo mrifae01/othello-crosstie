@@ -4,7 +4,18 @@
  * simulated analysis run. State lives in this tab only.
  */
 import type { AnalysisResult, GameState, Player, SeatResponse, Square } from '@othello/shared';
-import { countDiscs, getLegalMoves, initialBoard, opponent, winnerOf } from '@othello/shared';
+import {
+  ANALYSIS_SEARCH_OPTIONS,
+  countDiscs,
+  getLegalMoves,
+  gradeMove,
+  initialBoard,
+  opponent,
+  replayChecked,
+  search,
+  squareToAlg,
+  winnerOf,
+} from '@othello/shared';
 import { GameClientError, type GameClient, type GameEventHandlers, type GameSubscription } from './GameClient';
 import { analysisFor, buildFixtures, FIXTURE_IDS, FIXTURE_LABELS, summaryOf, type MockGameRecord } from '../mocks/fixtures';
 import { heuristicLoss } from '../mocks/mockAnalysis';
@@ -239,6 +250,36 @@ export function createMockClient(): MockClient {
     },
     async requestCoachDebrief() {
       throw new GameClientError('COACH_UNAVAILABLE', 'The AI coach is not available in mock mode');
+    },
+    // Practice's Explain why works in mock mode so the flow can be tried: a real engine grade
+    // (as the server computes it) with canned text that says it isn't Claude.
+    async getCoachStatus() {
+      return { enabled: true };
+    },
+    async explainMove({ moves, ply }) {
+      await wait(900);
+      const line = moves.slice(0, ply);
+      const move = line[ply - 1];
+      if (!move || move.square === null) throw new GameClientError('BAD_REQUEST', 'A pass has nothing to explain');
+      let before;
+      try {
+        replayChecked(line);
+        before = replayChecked(line.slice(0, -1)).board;
+      } catch (e) {
+        throw new GameClientError('ILLEGAL_MOVE', (e as Error).message);
+      }
+      const grade = gradeMove(before, move.player, move.square, search(before, move.player, ANALYSIS_SEARCH_OPTIONS), ply);
+      const played = squareToAlg(move.square);
+      return {
+        grade,
+        explanation: {
+          ply,
+          title: `Mock coach: ${played}`,
+          explanation: `In mock mode there's no Claude, so this canned text stands in for the AI coach's explanation of ${played} (${grade.classification}).`,
+          lesson: 'Run against the real API with ANTHROPIC_API_KEY set to see a real explanation.',
+        },
+        model: 'mock',
+      };
     },
 
     // Mock mode is guest-only (main.tsx never enables auth with it), so these are unreachable.

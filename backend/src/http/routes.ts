@@ -4,7 +4,9 @@ import type {
   ApiError,
   CoachDebrief,
   CoachDebriefResponse,
+  CoachStatusResponse,
   ErrorCode,
+  ExplainMoveResponse,
   GameState,
   GameStatus,
   ListGamesResponse,
@@ -22,6 +24,7 @@ import { getAccount, upsertAccount } from '../db/accountsRepo';
 import { authEnabled, verifyAccessToken, type AuthUser } from '../auth/verifyToken';
 import type { AnalysisRunner } from '../analysis/AnalysisRunner';
 import type { CoachService } from '../coach/CoachService';
+import type { ExplainService } from '../coach/ExplainService';
 import { GameError, toGameSummary, type GameService } from '../game/GameService';
 import type { TournamentService } from '../tournament/TournamentService';
 
@@ -41,6 +44,7 @@ const STATUS_FOR: Record<ErrorCode, number> = {
   TOURNAMENT_NOT_OPEN: 409,
   ANALYSIS_NOT_READY: 409,
   COACH_UNAVAILABLE: 503,
+  RATE_LIMITED: 429,
   INTERNAL: 500,
 };
 
@@ -160,6 +164,7 @@ export function apiRouter(
   analysis: AnalysisRunner,
   tournaments: TournamentService,
   coach: CoachService,
+  explain: ExplainService,
 ): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: '10kb' }));
@@ -218,6 +223,19 @@ export function apiRouter(
   r.post('/games/:id/coach', wrap(async (req, res) => {
     const player = parsePlayer((req.body as { player?: unknown } | null)?.player);
     const body: CoachDebrief = await coach.generate(req.params.id, player);
+    res.json(body);
+  }));
+
+  // ---------- AI coach for Practice (no saved game; see ExplainService) ----------
+
+  r.get('/coach', wrap(async (_req, res) => {
+    const body: CoachStatusResponse = { enabled: coach.enabled };
+    res.json(body);
+  }));
+
+  /** Grades and explains one move of a practice line. A Claude call on a cache miss (a few seconds). */
+  r.post('/coach/explain', wrap(async (req, res) => {
+    const body: ExplainMoveResponse = await explain.explain(req.body, req.ip ?? 'unknown');
     res.json(body);
   }));
 

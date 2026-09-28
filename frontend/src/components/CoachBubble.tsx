@@ -18,13 +18,19 @@ interface Props {
   moment?: CoachMoment | null;
   /** Whether the server's AI coach is on; off, the template is labelled as a preview of it. */
   aiEnabled?: boolean;
+  /** Practice: no "AI coach preview" label; graded moves get the Explain why button. */
+  variant?: 'review' | 'practice';
+  /** Practice: asks the AI coach to explain this move. Omitted = no button (the coach is off). */
+  onExplain?: () => void;
+  /** Practice: an explanation is being written. */
+  explaining?: boolean;
 }
 
 /**
  * The coach's voice in Game Review. On a key moment of an AI debrief it speaks the debrief's
  * explanation; everywhere else it's a template over the engine's classification and motifs.
  */
-export function CoachBubble({ ply, summary, moment, aiEnabled = false }: Props) {
+export function CoachBubble({ ply, summary, moment, aiEnabled = false, variant = 'review', onExplain, explaining = false }: Props) {
   const { headline, body } = moment
     ? { headline: moment.title, body: moment.explanation }
     : ply
@@ -36,10 +42,21 @@ export function CoachBubble({ ply, summary, moment, aiEnabled = false }: Props) 
       <div className="coach-bubble">
         <div className="coach-head">
           <strong>{headline}</strong>
-          {moment ? <span className="live-badge">AI coach</span> : !aiEnabled && <ComingSoon label="AI coach preview" />}
+          {moment ? (
+            <span className="live-badge">AI coach</span>
+          ) : (
+            !aiEnabled && variant === 'review' && <ComingSoon label="AI coach preview" />
+          )}
         </div>
         <p>{body}</p>
         {moment && <p className="coach-lesson">{moment.lesson}</p>}
+        {variant === 'practice' && ply && ply.square !== null && !moment && onExplain && (
+          <div className="coach-explain">
+            <button type="button" className="btn btn-small" onClick={onExplain} disabled={explaining}>
+              {explaining ? 'Coach is writing…' : 'Explain why'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

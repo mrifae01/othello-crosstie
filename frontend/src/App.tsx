@@ -6,6 +6,7 @@ import { GamePage } from './pages/GamePage';
 import { ReviewPage } from './pages/ReviewPage';
 import { ReviewListPage } from './pages/ReviewListPage';
 import { LearnPage } from './pages/LearnPage';
+import { PracticePage } from './pages/PracticePage';
 import { TournamentsPage } from './pages/TournamentsPage';
 import { TournamentPage } from './pages/TournamentPage';
 
@@ -21,6 +22,7 @@ export function App() {
           <Route path="/game/:id/analysis" element={<ReviewPage />} />
           <Route path="/review" element={<ReviewListPage />} />
           <Route path="/learn" element={<LearnPage />} />
+          <Route path="/practice" element={<PracticePage />} />
           <Route path="/tournaments" element={<TournamentsPage />} />
           <Route path="/tournaments/:id" element={<TournamentPage />} />
           <Route

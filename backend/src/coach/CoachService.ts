@@ -49,6 +49,17 @@ export class CoachService {
     return this.client !== null && Date.now() >= this.pausedUntil;
   }
 
+  /** The Claude client and model, for other coach features (Practice's Explain why) to share. null without a key. */
+  get claude(): { client: Anthropic; model: string } | null {
+    return this.client ? { client: this.client, model: this.model } : null;
+  }
+
+  /** Pauses the coach after a failed call from another coach feature, exactly as a failed debrief does. */
+  pauseAfter(err: CoachCallError): void {
+    this.pausedUntil = Date.now() + COOLDOWN_MS[err.kind];
+    console.warn(`[coach] paused for ${COOLDOWN_MS[err.kind] / 60_000} min after a ${err.kind} failure`);
+  }
+
   /** GET /api/games/:id/coach: the cached debrief, if any. Never calls Claude. */
   async get(gameId: string, player: Player): Promise<CoachDebriefResponse> {
     await this.games.getSummary(gameId); // GAME_NOT_FOUND
@@ -108,7 +119,7 @@ export class CoachCallError extends GameError {
   }
 }
 
-function failureKind(err: unknown): CoachCallError['kind'] {
+export function failureKind(err: unknown): CoachCallError['kind'] {
   if (err instanceof Anthropic.RateLimitError) return 'transient';
   if (err instanceof Anthropic.APIError && err.status !== undefined && err.status >= 400 && err.status < 500) return 'account';
   return 'transient'; // connection errors and timeouts (status undefined), 5xx, anything unexpected

@@ -684,3 +684,26 @@ a.lesson:hover { background: var(--surface-2); }
 .debrief-callout-head svg { flex: none; color: var(--callout-color); }
 .debrief-callout-strength { --callout-color: var(--cls-best); --callout-bg: rgba(78, 125, 91, 0.08); }
 .debrief-callout-next { --callout-color: var(--gold); --callout-bg: var(--gold-soft); }
+
+/* ---------- Practice (play the bot with live coaching) ---------- */
+.practice-colors { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; margin: 4px 0 12px; }
+.level-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.practice-hint { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius); background: var(--gold-soft); border-left: 3px solid var(--gold); }
+.practice-hint svg { flex: none; margin-top: 2px; color: var(--gold); }
+.practice-hint p { margin: 0; font-size: 0.92rem; color: var(--ink); }
+.practice-controls { display: flex; flex-direction: column; gap: 10px; }
+.practice-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.practice-row-secondary { justify-content: space-between; }
+.practice-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.practice-toggle input { margin: 0; padding: 0; accent-color: var(--accent); }
+.practice-over { display: flex; flex-direction: column; gap: 10px; }
+.practice-over .result-banner { margin-bottom: 0; }
+/* Countdown before the bot answers a mistake: the ring fills while Take back is still one click away. */
+.progress-ring { flex: none; transform: rotate(-90deg); }
+.progress-ring circle { fill: none; stroke-width: 4; }
+.progress-ring-track { stroke: var(--line); }
+.progress-ring-fill { stroke: var(--accent); stroke-dasharray: 100; stroke-dashoffset: 100; animation: ring-fill linear forwards; }
+@keyframes ring-fill { to { stroke-dashoffset: 0; } }
+.coach-explain { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.play-option-body { margin-top: 12px; }
+.play-option-body .practice-colors { margin-top: 0; }

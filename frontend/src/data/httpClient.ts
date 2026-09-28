@@ -12,7 +12,9 @@ import type {
   ApiError,
   CoachDebrief,
   CoachDebriefResponse,
+  CoachStatusResponse,
   ClientToServerEvents,
+  ExplainMoveResponse,
   ErrorCode,
   GameState,
   ListGamesResponse,
@@ -146,6 +148,8 @@ export function createHttpClient(getAccessToken: AccessTokenProvider = async () 
       call<CoachDebriefResponse>('GET', `/games/${encodeURIComponent(gameId)}/coach?player=${player}`),
     requestCoachDebrief: (gameId, player) =>
       call<CoachDebrief>('POST', `/games/${encodeURIComponent(gameId)}/coach`, { player }),
+    getCoachStatus: () => call<CoachStatusResponse>('GET', '/coach'),
+    explainMove: (req) => call<ExplainMoveResponse>('POST', '/coach/explain', req),
 
     getMe: async (): Promise<Account | null> => (await call<MeResponse>('GET', '/me')).account,
     claimUsername: async (username) => (await call<MeResponse>('PUT', '/me', { username })).account!,

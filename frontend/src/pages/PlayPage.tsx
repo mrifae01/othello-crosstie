@@ -6,6 +6,7 @@ import { setSeatToken } from '../data/seatStorage';
 import { Board } from '../components/Board';
 import { ComingSoon } from '../components/ComingSoon';
 import { PlayerBar } from '../components/PlayerBar';
+import { PracticeLauncher } from '../components/PracticeLauncher';
 import { SeatForm } from '../components/SeatForm';
 import { useToasts } from '../components/Toasts';
 import { BotIcon, ChevronRightIcon, PlayIcon, TargetIcon, TrophyIcon, UsersIcon } from '../components/icons';
@@ -59,19 +60,23 @@ export function PlayPage() {
             <p className="muted tiny">You play Black and move first. Your friend takes White from the link.</p>
           </section>
 
-          <div className="play-option" aria-disabled>
+          <section className="play-option">
             <div className="play-option-title">
               <span className="play-option-icon">
                 <BotIcon size={26} />
               </span>
               <span>
-                <strong>
-                  Play the AI coach <ComingSoon />
-                </strong>
-                <span className="muted small">An engine opponent that adapts to your level and explains its moves.</span>
+                <strong>Play the AI coach</strong>
+                <span className="muted small">
+                  Play a bot at your level while the coach grades every move, gives hints and explains why.
+                </span>
               </span>
             </div>
-          </div>
+            <div className="play-option-body">
+              <PracticeLauncher />
+            </div>
+            <p className="muted tiny">Practice games aren't saved. Take back or replay any move.</p>
+          </section>
 
           <div className="play-option" aria-disabled>
             <div className="play-option-title">

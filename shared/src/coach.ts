@@ -272,3 +272,138 @@ export function groundMoments(moments: CoachMoment[], facts: GameFacts): { momen
   }
   return { moments: kept.sort((a, z) => a.ply - z.ply), dropped };
 }
+
+// ---------- one move, explained on demand (Practice "Explain why") ----------
+
+/** What the explained move is compared with, so the model has a concrete "instead of". */
+export interface MoveComparison {
+  /** 'engine best' when the player missed the best move; 'next best' when they found it. */
+  against: 'engine best' | 'next best';
+  move: string;
+  squareType: SquareType;
+  /** How many discs better the engine best was, or how many discs worse the next-best move was. Always >= 0. */
+  discsDifference: number;
+  opponentRepliesAfterPlayed: number;
+  opponentRepliesAfterOther: number;
+  /** True when the reply counts differ by at least MOBILITY_MARGIN in a direction that explains the verdict. */
+  mobilityExplains: boolean;
+  /** The comparison in words, already worked out. */
+  mobilityVerdict: string;
+}
+
+export interface MoveFacts {
+  coachedColor: 'Black' | 'White';
+  ply: number;
+  phase: GamePhase;
+  emptySquares: number;
+  played: string;
+  playedSquareType: SquareType;
+  classification: MoveClass;
+  /** True when the played move was the engine's best (or tied with it). */
+  playedWasBest: boolean;
+  discsLost: number;
+  engineBest: string;
+  engineBestSquareType: SquareType;
+  /** Evals from the coached player's side (+ = they are ahead), in discs. */
+  evalWithBestMove: number;
+  evalAfterPlayedMove: number;
+  engineTopMoves: { move: string; squareType: SquareType; eval: number }[];
+  motifs: Motif[];
+  cornersOpenedForOpponent: string[];
+  /** null when the played move was the only legal move. */
+  comparison: MoveComparison | null;
+  solvedExactly: boolean;
+  board: string;
+}
+
+function bestMoveMobility(afterPlayed: number, afterNext: number): { explains: boolean; verdict: string } {
+  const diff = afterNext - afterPlayed;
+  if (diff >= MOBILITY_MARGIN) {
+    return {
+      explains: true,
+      verdict: `Your move left your opponent ${diff} fewer replies than the next-best move would have (${afterPlayed} instead of ${afterNext}): mobility is part of why it was best.`,
+    };
+  }
+  return {
+    explains: false,
+    verdict: `Your move and the next-best move left your opponent a similar number of replies, or more after yours (${afterPlayed} vs ${afterNext}): mobility does not explain why your move was better.`,
+  };
+}
+
+/**
+ * The fact sheet for explaining one graded move, whatever its grade: why it lost against the
+ * engine's best, or why it beat the next-best move. Built from `gradeMove`'s output.
+ */
+export function buildMoveFacts(p: PlyAnalysis): MoveFacts {
+  if (p.square === null) throw new Error('A pass has nothing to explain');
+  const sign = p.player === 'B' ? 1 : -1;
+  const m = momentFacts(p, sign);
+  const opp = opponent(p.player);
+  const playedWasBest = p.bestSquare === p.square || p.loss === 0;
+
+  let comparison: MoveComparison | null = null;
+  const replies = (sq: Square) => getLegalMoves(applyMove(p.boardBefore, p.player, sq).board, opp).length;
+  if (p.classification !== 'forced' && p.candidates.length > 1) {
+    const afterPlayed = getLegalMoves(p.boardAfter, opp).length;
+    if (!playedWasBest && p.bestSquare !== null) {
+      comparison = {
+        against: 'engine best',
+        move: squareToAlg(p.bestSquare),
+        squareType: squareType(p.bestSquare),
+        discsDifference: m.discsLost,
+        opponentRepliesAfterPlayed: afterPlayed,
+        opponentRepliesAfterOther: m.mobility.opponentRepliesAfterBest,
+        mobilityExplains: m.mobility.explainsLoss,
+        mobilityVerdict: m.mobility.verdict,
+      };
+    } else {
+      const next = p.candidates.find((c) => c.square !== p.square)!;
+      const afterNext = replies(next.square);
+      const mob = bestMoveMobility(afterPlayed, afterNext);
+      comparison = {
+        against: 'next best',
+        move: squareToAlg(next.square),
+        squareType: squareType(next.square),
+        discsDifference: Math.max(0, round1(sign * (p.evalAfter - next.eval))),
+        opponentRepliesAfterPlayed: afterPlayed,
+        opponentRepliesAfterOther: afterNext,
+        mobilityExplains: mob.explains,
+        mobilityVerdict: mob.verdict,
+      };
+    }
+  }
+
+  return {
+    coachedColor: colorName(p.player),
+    ply: m.ply,
+    phase: m.phase,
+    emptySquares: m.emptySquares,
+    played: m.played,
+    playedSquareType: m.playedSquareType,
+    classification: m.classification,
+    playedWasBest,
+    discsLost: m.discsLost,
+    engineBest: m.engineBest,
+    engineBestSquareType: m.engineBestSquareType,
+    evalWithBestMove: m.evalWithBestMove,
+    evalAfterPlayedMove: m.evalAfterPlayedMove,
+    engineTopMoves: m.engineTopMoves,
+    motifs: m.motifs,
+    cornersOpenedForOpponent: m.cornersOpenedForOpponent,
+    comparison,
+    solvedExactly: m.solvedExactly,
+    board: m.board,
+  };
+}
+
+/** Squares an explanation of `f` may name, like nameableSquares for a debrief moment. */
+export function nameableMoveSquares(f: MoveFacts): Set<string> {
+  const extra = f.comparison ? [f.comparison.move] : [];
+  return new Set([...ALWAYS_NAMEABLE, f.played, f.engineBest, ...f.engineTopMoves.map((c) => c.move), ...f.cornersOpenedForOpponent, ...extra]);
+}
+
+/** Squares an explanation names that its facts don't: a sign the model invented a line. [] = grounded. */
+export function strayMoveSquares(e: { title: string; explanation: string; lesson: string }, f: MoveFacts): string[] {
+  const allowed = nameableMoveSquares(f);
+  return [...new Set(mentionedSquares(`${e.title} ${e.explanation} ${e.lesson}`).filter((s) => !allowed.has(s)))];
+}

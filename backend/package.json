@@ -9,7 +9,9 @@
     "migrate": "tsx src/db/migrate.ts",
     "smoke": "tsx scripts/smoke.ts",
     "bench": "tsx scripts/bench-analysis.ts",
+    "bot-match": "tsx scripts/bot-match.ts",
     "coach:preview": "tsx scripts/coach-preview.ts",
+    "explain:preview": "tsx scripts/explain-preview.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
