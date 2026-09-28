@@ -222,7 +222,7 @@ export function apiRouter(
   /** Generates on first request (a Claude call, several seconds), then serves the cached debrief. */
   r.post('/games/:id/coach', wrap(async (req, res) => {
     const player = parsePlayer((req.body as { player?: unknown } | null)?.player);
-    const body: CoachDebrief = await coach.generate(req.params.id, player);
+    const body: CoachDebrief = await coach.generate(req.params.id, player, req.ip ?? 'unknown');
     res.json(body);
   }));
 

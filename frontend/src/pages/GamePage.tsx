@@ -162,7 +162,7 @@ function GameView({ gameId }: { gameId: string }) {
           <div className="panel-section coach-teaser">
             <SparkleIcon size={18} />
             <span className="small">
-              When this game ends, the engine reviews every move. <span className="muted">AI coach explanations coming soon.</span>
+              When this game ends, the engine reviews every move and the AI coach explains your turning points.
             </span>
           </div>
         )}

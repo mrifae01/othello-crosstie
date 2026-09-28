@@ -111,14 +111,14 @@ export function HomePage() {
             <Feature icon={ReviewIcon} title="Game Review" to="/review" available>
               Accuracy for both players, the eval graph, and the best move you missed, for every move.
             </Feature>
-            <Feature icon={SparkleIcon} title="AI Coach">
+            <Feature icon={SparkleIcon} title="AI Coach" to="/review" available>
               Plain-English explanations of each mistake, plus a summary of what to work on next.
+            </Feature>
+            <Feature icon={BotIcon} title="Practice vs AI" to="/play" available>
+              Play a bot at your level while the coach grades every move, with hints, take-backs and Explain why.
             </Feature>
             <Feature icon={PuzzleIcon} title="Puzzles from your games">
               Positions where you went wrong, turned into puzzles you can solve until the idea sticks.
-            </Feature>
-            <Feature icon={BotIcon} title="Practice vs AI">
-              Replay critical positions against an engine that adjusts to your level.
             </Feature>
           </ul>
         </div>
@@ -186,7 +186,7 @@ function Feature({ icon: Icon, title, to, available = false, children }: Feature
       </span>
       <span className="feature-text">
         <strong>
-          {title} {available ? <span className="live-badge">Live</span> : <ComingSoon />}
+          {title} {!available && <ComingSoon />}
         </strong>
         <span className="muted">{children}</span>
       </span>

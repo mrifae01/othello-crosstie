@@ -11,36 +11,15 @@ import {
 import { GameError } from '../game/GameService';
 import { CoachCallError, type CoachService } from './CoachService';
 import { EXPLAIN_PROMPT_VERSION, writeExplanation } from './explain';
+import { ClaudeCallLimiter } from './rateLimit';
 
 /** A full game is 60 moves plus passes; anything longer isn't a game. */
 const MAX_LINE = 128;
 /** Explanations kept in memory (oldest dropped first). The same mistakes recur across players. */
 const CACHE_SIZE = 1000;
 /** New explanations (cache misses) per client IP per window, and for the whole server per hour. */
-const PER_IP = { max: 20, windowMs: 10 * 60_000 };
+const PER_IP = { max: 50, windowMs: 60 * 60_000 };
 const GLOBAL = { max: 600, windowMs: 60 * 60_000 };
-
-/** Fixed-window request counter: `take` is false once `max` is used up in the current window. */
-class WindowCounter {
-  private windows = new Map<string, { start: number; count: number }>();
-  constructor(private readonly limit: { max: number; windowMs: number }) {}
-
-  take(key: string, now = Date.now()): boolean {
-    let w = this.windows.get(key);
-    if (!w || now - w.start >= this.limit.windowMs) {
-      w = { start: now, count: 0 };
-      this.windows.set(key, w);
-      if (this.windows.size > 10_000) this.sweep(now);
-    }
-    if (w.count >= this.limit.max) return false;
-    w.count++;
-    return true;
-  }
-
-  private sweep(now: number) {
-    for (const [k, w] of this.windows) if (now - w.start >= this.limit.windowMs) this.windows.delete(k);
-  }
-}
 
 /**
  * Practice's "Explain why": the server replays the client's line, grades the move with the same
@@ -51,8 +30,7 @@ class WindowCounter {
 export class ExplainService {
   private readonly cache = new Map<string, ExplainMoveResponse>();
   private readonly inFlight = new Map<string, Promise<ExplainMoveResponse>>();
-  private readonly perIp = new WindowCounter(PER_IP);
-  private readonly global = new WindowCounter(GLOBAL);
+  private readonly limiter = new ClaudeCallLimiter(PER_IP, GLOBAL);
 
   constructor(private readonly coach: CoachService) {}
 
@@ -68,7 +46,7 @@ export class ExplainService {
     if (running) return running;
 
     if (!claude || !this.coach.enabled) throw new GameError('COACH_UNAVAILABLE', 'The AI coach is unavailable right now');
-    if (!this.perIp.take(clientIp) || !this.global.take('*')) {
+    if (!this.limiter.allow(clientIp)) {
       throw new GameError('RATE_LIMITED', 'Too many explanations requested. Try again in a few minutes.');
     }
 

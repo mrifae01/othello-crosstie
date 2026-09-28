@@ -39,4 +39,4 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
  * Sonnet, thinking off: the engine and the fact sheet do the reasoning, so the coach only has to
  * explain them faithfully. Haiku was cheaper but misread comparisons in the facts.
  */
-export const COACH_MODEL = 'claude-sonnet-5';
+export const COACH_MODEL = process.env.COACH_MODEL || 'claude-sonnet-5';

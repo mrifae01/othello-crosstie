@@ -14,6 +14,7 @@ import type { DebriefContent } from '../db/coachRepo';
 import type { AnalysisRunner } from '../analysis/AnalysisRunner';
 import { GameError, type GameService } from '../game/GameService';
 import { buildUserPrompt, DebriefOutput, PROMPT_VERSION, SYSTEM_PROMPT } from './prompt';
+import { ClaudeCallLimiter } from './rateLimit';
 
 /**
  * How long the coach stays off after a failed call, by kind. `account` failures (no balance,
@@ -21,6 +22,12 @@ import { buildUserPrompt, DebriefOutput, PROMPT_VERSION, SYSTEM_PROMPT } from '.
  * While off, clients fall back to the plain engine review instead of waiting on a dead API.
  */
 const COOLDOWN_MS = { account: 30 * 60_000, transient: 2 * 60_000 } as const;
+/**
+ * New debriefs (cache misses) per client IP per hour, and for the whole server per hour. Each game
+ * allows two, but games are free to create, so the endpoint still needs a budget behind a paid API.
+ */
+const PER_IP = { max: 10, windowMs: 60 * 60_000 };
+const GLOBAL = { max: 200, windowMs: 60 * 60_000 };
 
 /**
  * The AI coach's post-game debrief. The engine analysis is the source of truth: this turns it
@@ -31,6 +38,7 @@ export class CoachService {
   private readonly client: Anthropic | null;
   /** One Claude call per (game, player) at a time; concurrent requests share it. */
   private readonly inFlight = new Map<string, Promise<CoachDebrief>>();
+  private readonly limiter = new ClaudeCallLimiter(PER_IP, GLOBAL);
   /** Epoch ms until which new debriefs aren't attempted (see COOLDOWN_MS). */
   private pausedUntil = 0;
 
@@ -67,22 +75,25 @@ export class CoachService {
   }
 
   /** POST /api/games/:id/coach: the cached debrief, or a new one. */
-  async generate(gameId: string, player: Player): Promise<CoachDebrief> {
+  async generate(gameId: string, player: Player, clientIp: string): Promise<CoachDebrief> {
     const key = `${gameId}:${player}`;
     let run = this.inFlight.get(key);
     if (!run) {
-      run = this.loadOrCreate(gameId, player).finally(() => this.inFlight.delete(key));
+      run = this.loadOrCreate(gameId, player, clientIp).finally(() => this.inFlight.delete(key));
       this.inFlight.set(key, run);
     }
     return run;
   }
 
-  private async loadOrCreate(gameId: string, player: Player): Promise<CoachDebrief> {
+  private async loadOrCreate(gameId: string, player: Player, clientIp: string): Promise<CoachDebrief> {
     const result = await this.analysis.getAnalysis(gameId); // GAME_NOT_FOUND
     const cached = await repo.loadDebrief(gameId, player, PROMPT_VERSION);
     if (cached) return cached;
     if (!this.client || !this.enabled) throw new GameError('COACH_UNAVAILABLE', 'The AI coach is unavailable right now');
     if (result.status !== 'done') throw new GameError('ANALYSIS_NOT_READY', 'The engine analysis is not finished yet');
+    if (!this.limiter.allow(clientIp)) {
+      throw new GameError('RATE_LIMITED', 'Too many coach debriefs requested. Try again later.');
+    }
 
     const facts = buildCoachFacts(result.game, result.plies, player);
     const t0 = Date.now();

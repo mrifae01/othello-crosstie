@@ -72,7 +72,7 @@ export function LearnPage() {
           <CornerPuzzle />
         </LearnCard>
 
-        <LearnCard icon={BookIcon} title="Lessons">
+        <LearnCard icon={BookIcon} title="Lessons" badge={<ComingSoon />}>
           <ul className="lesson-list">
             {LESSONS.map((l) => (
               <li key={l.title}>
