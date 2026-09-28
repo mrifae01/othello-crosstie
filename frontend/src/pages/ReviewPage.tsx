@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { AnalysisResult, Player, PlayerAnalysisSummary, PlyAnalysis } from '@othello/shared';
 import { countDiscs, squareToAlg } from '@othello/shared';
+import { useAuth } from '../auth/AuthContext';
 import { useGameClient } from '../data/ClientContext';
+import { useCoachDebrief } from '../data/useCoachDebrief';
 import { isGameClientError } from '../data/GameClient';
 import { AnalysisBar } from '../components/AnalysisBar';
 import { Board } from '../components/Board';
@@ -11,6 +13,7 @@ import { MoveList } from '../components/MoveList';
 import { PlayerBar } from '../components/PlayerBar';
 import { EvalBar } from '../components/EvalBar';
 import { CoachBubble } from '../components/CoachBubble';
+import { CoachDebriefCard } from '../components/CoachDebriefCard';
 import { ChevronLeftIcon, ChevronRightIcon, FirstIcon, LastIcon, ReviewIcon } from '../components/icons';
 import { CLASS_LABEL, CLASS_ORDER, MOTIF_LABEL, colorName, errorText, fmtEval, resultText } from '../format';
 
@@ -154,6 +157,12 @@ function ReviewBody({ result, summary }: ReviewBodyProps) {
   const counts = countDiscs(board);
   const evalNow = ply ? ply.evalBefore : plies[n - 1].evalAfter;
 
+  // Coach the signed-in player's own seat by default; otherwise start with Black.
+  const { account } = useAuth();
+  const [coached, setCoached] = useState<Player>(() => (account && game.players.W?.accountId === account.id ? 'W' : 'B'));
+  const coach = useCoachDebrief(game.gameId, coached);
+  const moment = (ply && coach.debrief?.moments.find((m) => m.ply === ply.ply)) ?? null;
+
   return (
     <div className="stage stage-review">
       <section className="stage-board">
@@ -180,7 +189,23 @@ function ReviewBody({ result, summary }: ReviewBodyProps) {
 
         <div className="panel-body">
           <p className="muted small review-result">{resultText(game)}</p>
-          <CoachBubble ply={ply} summary={`${resultText(game)}. Step back through the moves to see where it turned.`} />
+          <CoachBubble
+            ply={ply}
+            moment={moment}
+            aiEnabled={coach.enabled === true}
+            summary={`${resultText(game)}. Step back through the moves to see where it turned.`}
+          />
+
+          {(coach.enabled || coach.hasAny) && (
+            <CoachDebriefCard
+              result={result}
+              player={coached}
+              onPlayerChange={setCoached}
+              coach={coach}
+              onSelectPly={(p) => go(p - 1)}
+              currentPly={ply ? ply.ply : null}
+            />
+          )}
 
           <div className="summary-cards">
             <SummaryCard result={result} player="B" s={summary.B} />

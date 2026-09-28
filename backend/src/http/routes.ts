@@ -2,6 +2,8 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import type {
   AnalysisResult,
   ApiError,
+  CoachDebrief,
+  CoachDebriefResponse,
   ErrorCode,
   GameState,
   GameStatus,
@@ -9,6 +11,7 @@ import type {
   ForfeitRequest,
   ListTournamentsResponse,
   MeResponse,
+  Player,
   SeatResponse,
   TournamentDetail,
   TournamentStatus,
@@ -18,6 +21,7 @@ import { listGames, pingDb, type SeatHolder } from '../db/gamesRepo';
 import { getAccount, upsertAccount } from '../db/accountsRepo';
 import { authEnabled, verifyAccessToken, type AuthUser } from '../auth/verifyToken';
 import type { AnalysisRunner } from '../analysis/AnalysisRunner';
+import type { CoachService } from '../coach/CoachService';
 import { GameError, toGameSummary, type GameService } from '../game/GameService';
 import type { TournamentService } from '../tournament/TournamentService';
 
@@ -35,6 +39,8 @@ const STATUS_FOR: Record<ErrorCode, number> = {
   TOURNAMENT_NOT_FOUND: 404,
   TOURNAMENT_FULL: 409,
   TOURNAMENT_NOT_OPEN: 409,
+  ANALYSIS_NOT_READY: 409,
+  COACH_UNAVAILABLE: 503,
   INTERNAL: 500,
 };
 
@@ -141,10 +147,20 @@ function parseMatchRef(params: Record<string, string>): { round: number; slot: n
   return { round, slot };
 }
 
+function parsePlayer(raw: unknown): Player {
+  if (raw !== 'B' && raw !== 'W') throw new GameError('BAD_REQUEST', "`player` must be 'B' or 'W'");
+  return raw;
+}
+
 type Handler = (req: Request, res: Response) => Promise<void>;
 const wrap = (h: Handler) => (req: Request, res: Response, next: NextFunction) => h(req, res).catch(next);
 
-export function apiRouter(games: GameService, analysis: AnalysisRunner, tournaments: TournamentService): express.Router {
+export function apiRouter(
+  games: GameService,
+  analysis: AnalysisRunner,
+  tournaments: TournamentService,
+  coach: CoachService,
+): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: '10kb' }));
 
@@ -188,6 +204,20 @@ export function apiRouter(games: GameService, analysis: AnalysisRunner, tourname
 
   r.get('/games/:id/analysis', wrap(async (req, res) => {
     const body: AnalysisResult = await analysis.getAnalysis(req.params.id);
+    res.json(body);
+  }));
+
+  // ---------- AI coach (public like the analysis it explains) ----------
+
+  r.get('/games/:id/coach', wrap(async (req, res) => {
+    const body: CoachDebriefResponse = await coach.get(req.params.id, parsePlayer(req.query.player));
+    res.json(body);
+  }));
+
+  /** Generates on first request (a Claude call, several seconds), then serves the cached debrief. */
+  r.post('/games/:id/coach', wrap(async (req, res) => {
+    const player = parsePlayer((req.body as { player?: unknown } | null)?.player);
+    const body: CoachDebrief = await coach.generate(req.params.id, player);
     res.json(body);
   }));
 

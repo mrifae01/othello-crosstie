@@ -1,4 +1,4 @@
-import type { Motif, PlyAnalysis } from '@othello/shared';
+import type { CoachMoment, Motif, PlyAnalysis } from '@othello/shared';
 import { squareToAlg } from '@othello/shared';
 import { colorName } from '../format';
 import { ComingSoon } from './ComingSoon';
@@ -11,22 +11,35 @@ const MOTIF_TIP: Record<Motif, string> = {
   c_square: 'A C-square next to an empty corner is risky: it can give the opponent a way onto the edge.',
 };
 
+interface Props {
+  ply: PlyAnalysis | null;
+  summary: string;
+  /** The AI coach's explanation of this ply, when it is one of the debrief's key moments. */
+  moment?: CoachMoment | null;
+  /** Whether the server's AI coach is on; off, the template is labelled as a preview of it. */
+  aiEnabled?: boolean;
+}
+
 /**
- * The coach's voice in Game Review. For now it's a template over the engine's
- * classification and motifs; the AI coach will replace `coachLine` with a generated,
- * player-aware explanation behind the same UI.
+ * The coach's voice in Game Review. On a key moment of an AI debrief it speaks the debrief's
+ * explanation; everywhere else it's a template over the engine's classification and motifs.
  */
-export function CoachBubble({ ply, summary }: { ply: PlyAnalysis | null; summary: string }) {
-  const { headline, body } = ply ? coachLine(ply) : { headline: 'Game over', body: summary };
+export function CoachBubble({ ply, summary, moment, aiEnabled = false }: Props) {
+  const { headline, body } = moment
+    ? { headline: moment.title, body: moment.explanation }
+    : ply
+      ? coachLine(ply)
+      : { headline: 'Game over', body: summary };
   return (
     <div className="coach">
       <CoachSeal />
       <div className="coach-bubble">
         <div className="coach-head">
           <strong>{headline}</strong>
-          <ComingSoon label="AI coach preview" />
+          {moment ? <span className="live-badge">AI coach</span> : !aiEnabled && <ComingSoon label="AI coach preview" />}
         </div>
         <p>{body}</p>
+        {moment && <p className="coach-lesson">{moment.lesson}</p>}
       </div>
     </div>
   );

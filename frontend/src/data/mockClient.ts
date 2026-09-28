@@ -233,6 +233,14 @@ export function createMockClient(): MockClient {
       void runAnalysis(g);
     },
 
+    // No AI in mock mode: reviews show the template coach, as on a server without an API key.
+    async getCoachDebrief() {
+      return { enabled: false, debrief: null };
+    },
+    async requestCoachDebrief() {
+      throw new GameClientError('COACH_UNAVAILABLE', 'The AI coach is not available in mock mode');
+    },
+
     // Mock mode is guest-only (main.tsx never enables auth with it), so these are unreachable.
     async getMe() {
       return null;

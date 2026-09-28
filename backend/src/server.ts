@@ -8,6 +8,7 @@ import { pool } from './db/pool';
 import { GameService } from './game/GameService';
 import { apiRouter } from './http/routes';
 import { AnalysisRunner } from './analysis/AnalysisRunner';
+import { CoachService } from './coach/CoachService';
 import { TournamentService } from './tournament/TournamentService';
 import { registerSocketHandlers, roomFor } from './socket/handlers';
 
@@ -49,8 +50,11 @@ async function main(): Promise<void> {
     ready: (p) => io.to(roomFor(p.gameId)).emit('analysis:ready', p),
   });
 
+  const coach = new CoachService(games, analysis);
+  console.log(`[coach] ${coach.enabled ? 'AI coach enabled' : 'AI coach disabled (no ANTHROPIC_API_KEY)'}`);
+
   app.disable('x-powered-by');
-  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments));
+  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments, coach));
 
   httpServer.listen(PORT, () => console.log(`[api] listening on http://localhost:${PORT}`));
 

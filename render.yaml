@@ -25,6 +25,9 @@ services:
       # Same value as VITE_SUPABASE_URL. The API verifies Supabase access tokens against its JWKS.
       - key: SUPABASE_URL
         sync: false
+      # Enables the AI coach's post-game debriefs. Unset = template coach only.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # Add once the web app has a URL (not secret):
       - key: WEB_ORIGIN
         value: https://othello-crosstie-frontend.vercel.app/

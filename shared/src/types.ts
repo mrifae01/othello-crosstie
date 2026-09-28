@@ -145,6 +145,52 @@ export interface AnalysisResult {
   summary: { B: PlayerAnalysisSummary; W: PlayerAnalysisSummary } | null;
 }
 
+// ---------- Coach (AI debrief) ----------
+// The engine decides what was right; the coach (Claude) only explains it. Which plies are
+// discussed is chosen in code (selectKeyMoments in coach.ts), never by the model.
+
+/** One turning point in a player's game, explained. */
+export interface CoachMoment {
+  ply: number;
+  /** A few words, e.g. "The X-square that gave away h8". */
+  title: string;
+  /** What happened and why it cost discs, grounded in the engine's numbers. */
+  explanation: string;
+  /** The general principle to carry into future games. */
+  lesson: string;
+}
+
+/** A post-game debrief of one player's play. Cached per (game, player, prompt version). */
+export interface CoachDebrief {
+  gameId: string;
+  /** Whose play is being coached. */
+  player: Player;
+  headline: string;
+  /** 2–3 sentences on how the game went for this player. */
+  overview: string;
+  /** Something the player did well. */
+  strength: string;
+  /** Ply order. [] when the player made no inaccuracies. */
+  moments: CoachMoment[];
+  /** The one thing to work on next game. */
+  takeaway: string;
+  model: string;
+  createdAt: string;            // ISO 8601
+}
+
+/** GET /api/games/:id/coach?player=B|W */
+export interface CoachDebriefResponse {
+  /** false when the server has no Claude API key: clients keep their template coach. */
+  enabled: boolean;
+  /** The cached debrief, or null if none has been generated yet. */
+  debrief: CoachDebrief | null;
+}
+
+/** POST /api/games/:id/coach: generates the debrief (or returns the cached one). */
+export interface CoachDebriefRequest {
+  player: Player;
+}
+
 // ---------- REST DTOs ----------
 
 export type ErrorCode =
@@ -161,6 +207,8 @@ export type ErrorCode =
   | 'TOURNAMENT_NOT_FOUND'
   | 'TOURNAMENT_FULL'
   | 'TOURNAMENT_NOT_OPEN'  // the action doesn't fit the tournament's current status
+  | 'ANALYSIS_NOT_READY'   // the coach needs the engine analysis to be done first
+  | 'COACH_UNAVAILABLE'    // no Claude API key configured, or the coach call failed
   | 'INTERNAL';
 
 /** Body of every non-2xx REST response. */

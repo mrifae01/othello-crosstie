@@ -10,6 +10,8 @@ import type {
   Account,
   AnalysisResult,
   ApiError,
+  CoachDebrief,
+  CoachDebriefResponse,
   ClientToServerEvents,
   ErrorCode,
   GameState,
@@ -140,6 +142,10 @@ export function createHttpClient(getAccessToken: AccessTokenProvider = async () 
     listFinishedGames: async (limit = 20) =>
       (await call<ListGamesResponse>('GET', `/games?status=finished&limit=${limit}`)).games,
     getAnalysis: (gameId) => call<AnalysisResult>('GET', `/games/${encodeURIComponent(gameId)}/analysis`),
+    getCoachDebrief: (gameId, player) =>
+      call<CoachDebriefResponse>('GET', `/games/${encodeURIComponent(gameId)}/coach?player=${player}`),
+    requestCoachDebrief: (gameId, player) =>
+      call<CoachDebrief>('POST', `/games/${encodeURIComponent(gameId)}/coach`, { player }),
 
     getMe: async (): Promise<Account | null> => (await call<MeResponse>('GET', '/me')).account,
     claimUsername: async (username) => (await call<MeResponse>('PUT', '/me', { username })).account!,

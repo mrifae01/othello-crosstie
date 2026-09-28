@@ -29,3 +29,14 @@ export const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? '')
 export const SUPABASE_URL = (process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
 /** Only for projects still on the legacy shared HS256 secret; asymmetric keys are verified via JWKS. */
 export const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET ?? '';
+
+/**
+ * The AI coach (Claude). Unset = coach disabled: reviews keep the template coach, nothing else changes.
+ * Server-side only; never exposed to the web client.
+ */
+export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
+/**
+ * Sonnet, thinking off: the engine and the fact sheet do the reasoning, so the coach only has to
+ * explain them faithfully. Haiku was cheaper but misread comparisons in the facts.
+ */
+export const COACH_MODEL = 'claude-sonnet-5';

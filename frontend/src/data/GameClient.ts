@@ -10,6 +10,8 @@ import type {
   AnalysisProgressPayload,
   AnalysisReadyPayload,
   AnalysisResult,
+  CoachDebrief,
+  CoachDebriefResponse,
   ErrorCode,
   GameState,
   GameSummary,
@@ -73,6 +75,13 @@ export interface GameClient {
   move(gameId: string, playerToken: string, square: Square): Promise<void>;
   /** `game:resign`. */
   resign(gameId: string, playerToken: string): Promise<void>;
+
+  // ---- AI coach ----
+
+  /** GET /api/games/:id/coach?player=. The cached debrief (or null) and whether the coach is on. Never generates. */
+  getCoachDebrief(gameId: string, player: Player): Promise<CoachDebriefResponse>;
+  /** POST /api/games/:id/coach. Generates on first call (can take ~10–30s). Fails with COACH_UNAVAILABLE or ANALYSIS_NOT_READY. */
+  requestCoachDebrief(gameId: string, player: Player): Promise<CoachDebrief>;
 
   // ---- Accounts (only called while signed in; see auth/AuthContext) ----
 

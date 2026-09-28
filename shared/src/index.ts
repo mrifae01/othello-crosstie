@@ -6,3 +6,4 @@ export * from './engine/search';
 export * from './engine/analyze';
 export * from './engine/motifs';
 export * from './bracket';
+export * from './coach';
