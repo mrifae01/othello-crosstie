@@ -58,13 +58,12 @@
 
 ### Session 1 — 9/26, 9:30 AM - 11:20AM
 
-**Goal:** Complete architecture plan and begin implementation on foundational project of the game.
+Complete architecture plan and begin implementation on foundational project of the game.
 
 Finished architecture and planning. Basic game implementation along with initial game analyzation.
 
 ### Session 2 — 9/27, 9:50AM - 11:40AM
 
-**Goals:** 
 First hour:
 With the basics completed, review and ensure scability - accounts + tournaments. 
 Integrate supabase for account creation and add a "tournament" tab/drop down for users to create and join tournaments.
@@ -86,6 +85,14 @@ With my remaining time:
 30-45 mins - documentation and write up
 
 Finished developing what I could of my competetive edge. Obviously I couldnt get to doing everything I wanted and I will note that down in the final write up roadmap. Going to take a quick lunch break and in the final working session I going to test, review code, and finish writeup documentation. 
+
+### Session 4 — 9/28, 12:10 PM 
+
+With my remaining two hours:
+
+First hour I am going to test everything locally and what is live on vercel
+Second and final hour I am going to spend writing up documentation and ensuring everything is ready for handoff.
+
 
 ---
 
