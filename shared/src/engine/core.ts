@@ -63,11 +63,6 @@ export function countMoves(cells: Cells, color: Color): number {
   return n;
 }
 
-export function hasMove(cells: Cells, color: Color): boolean {
-  for (let sq = 0; sq < 64; sq++) if (cells[sq] === 0 && isLegal(cells, color, sq)) return true;
-  return false;
-}
-
 /**
  * Plays `sq` for `color` in place, writing flipped squares into `out` starting at `offset`.
  * Returns the number of flips (0 = illegal, and the board is untouched).

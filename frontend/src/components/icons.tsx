@@ -107,13 +107,6 @@ export const UsersIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const LinkIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
-    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
-  </Icon>
-);
-
 export const FlagIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M5 21V4M5 4h11l-2 4 2 4H5" />

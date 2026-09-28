@@ -10,13 +10,20 @@ import type {
   Account,
   AnalysisResult,
   ApiError,
+  ClaimUsernameRequest,
   CoachDebrief,
+  CoachDebriefRequest,
   CoachDebriefResponse,
   CoachStatusResponse,
   ClientToServerEvents,
+  CreateGameRequest,
+  CreateTournamentRequest,
+  ExplainMoveRequest,
   ExplainMoveResponse,
   ErrorCode,
+  ForfeitRequest,
   GameState,
+  JoinGameRequest,
   ListGamesResponse,
   ListTournamentsResponse,
   MeResponse,
@@ -138,8 +145,8 @@ export function createHttpClient(getAccessToken: AccessTokenProvider = async () 
   }
 
   return {
-    createGame: (name) => call<SeatResponse>('POST', '/games', { name }),
-    joinGame: (gameId, name) => call<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/join`, { name }),
+    createGame: (name) => call<SeatResponse>('POST', '/games', { name } satisfies CreateGameRequest),
+    joinGame: (gameId, name) => call<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/join`, { name } satisfies JoinGameRequest),
     getGame: (gameId) => call<GameState>('GET', `/games/${encodeURIComponent(gameId)}`),
     listFinishedGames: async (limit = 20) =>
       (await call<ListGamesResponse>('GET', `/games?status=finished&limit=${limit}`)).games,
@@ -147,24 +154,24 @@ export function createHttpClient(getAccessToken: AccessTokenProvider = async () 
     getCoachDebrief: (gameId, player) =>
       call<CoachDebriefResponse>('GET', `/games/${encodeURIComponent(gameId)}/coach?player=${player}`),
     requestCoachDebrief: (gameId, player) =>
-      call<CoachDebrief>('POST', `/games/${encodeURIComponent(gameId)}/coach`, { player }),
+      call<CoachDebrief>('POST', `/games/${encodeURIComponent(gameId)}/coach`, { player } satisfies CoachDebriefRequest),
     getCoachStatus: () => call<CoachStatusResponse>('GET', '/coach'),
-    explainMove: (req) => call<ExplainMoveResponse>('POST', '/coach/explain', req),
+    explainMove: (req) => call<ExplainMoveResponse>('POST', '/coach/explain', req satisfies ExplainMoveRequest),
 
     getMe: async (): Promise<Account | null> => (await call<MeResponse>('GET', '/me')).account,
-    claimUsername: async (username) => (await call<MeResponse>('PUT', '/me', { username })).account!,
+    claimUsername: async (username) => (await call<MeResponse>('PUT', '/me', { username } satisfies ClaimUsernameRequest)).account!,
     listMyGames: async (limit = 20) => (await call<ListGamesResponse>('GET', `/me/games?limit=${limit}`)).games,
 
     listTournaments: async (status, limit = 30) =>
       (await call<ListTournamentsResponse>('GET', `/tournaments?limit=${limit}${status ? `&status=${status}` : ''}`)).tournaments,
     getTournament: (id) => call<TournamentDetail>('GET', `/tournaments/${encodeURIComponent(id)}`),
-    createTournament: (name, maxPlayers) => call<TournamentDetail>('POST', '/tournaments', { name, maxPlayers }),
+    createTournament: (name, maxPlayers) => call<TournamentDetail>('POST', '/tournaments', { name, maxPlayers } satisfies CreateTournamentRequest),
     joinTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/join`),
     leaveTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/leave`),
     startTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/start`),
     cancelTournament: (id) => call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/cancel`),
     forfeitMatch: (id, round, slot, loser) =>
-      call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/matches/${round}/${slot}/forfeit`, { loser }),
+      call<TournamentDetail>('POST', `/tournaments/${encodeURIComponent(id)}/matches/${round}/${slot}/forfeit`, { loser } satisfies ForfeitRequest),
     claimSeat: (gameId) => call<SeatResponse>('POST', `/games/${encodeURIComponent(gameId)}/seat`),
 
     async subscribe(gameId, playerToken, handlers): Promise<GameSubscription> {

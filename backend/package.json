@@ -7,11 +7,6 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "migrate": "tsx src/db/migrate.ts",
-    "smoke": "tsx scripts/smoke.ts",
-    "bench": "tsx scripts/bench-analysis.ts",
-    "bot-match": "tsx scripts/bot-match.ts",
-    "coach:preview": "tsx scripts/coach-preview.ts",
-    "explain:preview": "tsx scripts/explain-preview.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -27,7 +22,6 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",
-    "@types/pg": "^8.11.10",
-    "socket.io-client": "^4.8.1"
+    "@types/pg": "^8.11.10"
   }
 }
