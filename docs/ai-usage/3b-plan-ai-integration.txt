@@ -1,0 +1,1326 @@
+
+❯ I am working on my competitive edge for this takhome assignment. I have a
+  plan for how to implement AI coaching after games in the game review (another
+  session is currently working on this). I want you to help me plan out what
+  we could do to implement AI Coaching and then a learning/puzzle section. Here
+  are my thoughts and let me know if you agree or disagree...
+
+  For the AI Coaching tab, we could have a simulated game with a bot. When the
+  user makes a move the AI coach can tell them how that move was rated, based
+  off our engine. Then user can continue like normal or have the ability to go
+  back in time to undo the move and play a better move or the last option would
+  be to "show best move". I am getting this insirpation from chess.com and how
+  the AI Coach helps players get better on that already well established
+  application.
+
+  Again this is just a planning phase, do not implement anything yet, just help
+  me plan.
+
+⏺ I'll look at what's in the repo first (engine, the in-progress coach work) so
+  the plan fits the code.
+
+⏺ Bash(ls; ls docs 2>/dev/null; git ls-files | grep -v node_modules | head -100;
+      echo ---; ls backend/src/coach; wc -l shared/src/*.ts backend/src/coach/*
+      2>/dev/null)
+  ⎿  (No output)
+
+⏺ Bash(git ls-files | sed -n '100,200p'; echo ---; cat
+      shared/src/engine/analyze.ts; echo ---; sed -n 1,80p
+      shared/src/engine/eval.ts; echo ---; grep -n "export" share…)
+  ⎿  (No output)
+
+⏺ Bash(sed -n 1,60p shared/src/engine/search.ts; grep -rn -i "bot\|vs
+      computer\|ai opponent" frontend/src/pages/PlayPage.tsx backend/src
+      --include=*.ts* | head -20; gr…)
+  ⎿  (No output)
+
+⏺ Mostly agree. The chess.com-style coached game is the right idea, and your
+  code is already set up for it. I'd change a few things about how it's built,
+  and I'd pick a different angle for puzzles. Here's what I found in the repo
+  and what I'd do.
+
+  What the repo already gives you
+
+  - The engine is pure TypeScript in shared/. search.ts
+    (shared/src/engine/search.ts) returns a score for every legal move.
+    analyze.ts (shared/src/engine/analyze.ts) has classify() with the
+    best/good/inaccuracy/mistake/blunder thresholds. motifs.ts
+    (shared/src/engine/motifs.ts) explains why a move is good or bad (corners,
+    X-squares, C-squares). The browser can run all of it, so coached practice
+    needs no backend.
+  - CoachBubble.tsx (frontend/src/components/CoachBubble.tsx) already has
+    coachLine(ply), which turns a classification plus motifs into text. Practice
+    mode can reuse it.
+  - There's no bot opponent yet. You'd need to add one.
+
+  AI Coach practice: agree, with five changes
+
+  1. Grade moves with the engine, not the LLM. An LLM call on every move is too
+  slow and costs money on each move. Rating a move is simple: look up the played
+  move's score, then classify(loss), then detectMotifs, then the template in
+  coachLine. The words the coach uses then match Game Review exactly. That
+  consistency is a selling point: one engine and one vocabulary across Review,
+  Practice and Puzzles. Keep the LLM for an optional "Explain why" button that
+  reuses the other session's CoachService on a single position.
+
+  2. Run the search while the player is thinking. When it becomes the user's
+  turn, a Web Worker scores every legal move. By the time they click, the rating
+  is already there, so feedback is instant and "Show best move" costs nothing.
+  A worker matters because a search can take around 400ms and would freeze the
+  UI on the main thread.
+
+  3. Add a hint before the move, not only after it. Chess.com works this way
+  too. Offer a ladder:
+  - Hint: name the idea behind the best move, e.g. "a corner is available" or
+    "watch the X-square".
+  - Show best move: highlight the square.
+  - Take back: after a bad move, undo it and try again.
+
+  You learn more by finding the move yourself than by seeing it after a mistake.
+  You could also track "found the best move on the 2nd try".
+
+  4. Make the bot beatable. At full strength the engine will crush beginners,
+  and they'll leave. Offer 3 levels using search depth plus randomness: easy
+  picks randomly among the top 3–4 moves, capped at "mistake"-sized losses; hard
+  plays the best move. This is a small pure function, say
+  shared/src/engine/bot.ts, with a seeded random number generator so tests are
+  repeatable.
+
+  5. Pause the bot so takebacks stay simple. After the user moves, show the
+  grade and wait for them to continue (or reply after about 1s if the move was
+  best or good). If the bot hasn't moved yet, "undo" just removes the last move
+  from the list. Keep the game state as moves[] in a reducer in shared/ that you
+  can unit-test (play / undo / botMove / reveal), with no React involved.
+
+  Open questions:
+  - Should practice games be saved? For v1 I'd say no, since the requirement to
+    save results covers human-vs-human games. Saving them later would feed the
+    skill profile.
+  - Should the eval bar show during practice? It gives the answer away, so make
+    it a toggle that's off by default.
+
+  Puzzles: build them from each player's own mistakes
+
+  A static puzzle collection is just content, and incumbents win on content.
+  Your advantage is that you already store engine analysis for every game. So:
+
+  - "Your mistakes" puzzles. Every inaccuracy or worse by the player (the same
+    filter selectKeyMoments in coach.ts (shared/src/coach.ts) uses) becomes a
+    puzzle: "You played c4 here. Find the better move." These are personal, free
+    to generate, and tie back to Review.
+  - A quality rule for puzzles. Only accept positions where the best move beats
+    the second-best by at least the mistake threshold (5 discs), so there's
+    exactly one clear answer. Positions with 12 or fewer empty squares are
+    solved exactly by the engine, so those puzzles are provably correct. That's
+    a good claim for your design notes.
+  - Tag each puzzle with its motif, like missed_corner or x_square. That tag
+    later connects puzzles to the sample skill bars on LearnPage.tsx
+    (frontend/src/pages/LearnPage.tsx): your weakest theme leads to puzzles on
+    that theme.
+
+  For v1, generate them on the fly from analysis you already have, with no new
+  table. In the roadmap: a puzzles table and a puzzle_attempts table, a seeded
+  shared set (a script run over stored games), multi-move puzzles, and spaced
+  repetition for ones you got wrong.
+
+  Scope for your remaining ~2 hours
+
+  Your README says you have about 2 hours left for the edge. Both features won't
+  fit at full quality. I'd rank them:
+
+  1. Coached practice (~75 min): the bot, the reducer with tests, the engine
+     worker, a practice page reusing Board and CoachBubble, and the hint / show
+     best / take back controls.
+  2. "Your mistakes" puzzles v1 (~45 min): generated on the fly, one at a time,
+     with pass/fail feedback.
+  3. Roadmap only: skill profile, saved puzzles and attempts, spaced repetition,
+     multi-move puzzles, the LLM "Explain why" in practice, and saving practice
+     games.
+
+  That fits the brief's advice that a clear plan beats a rushed feature. The
+  story in your docs becomes: "one engine, one vocabulary: Review diagnoses,
+  Practice drills live, Puzzles repeat your own mistakes."
+
+  Avoiding conflicts with the other session
+
+  It's editing shared/src/coach.ts, shared/src/types.ts, CoachService and
+  routes.ts. Keep this work in new files (engine/bot.ts, practice.ts,
+  puzzles.ts, a new page). Only import from coach.ts, so the two branches don't
+  conflict.
+
+  If you want this written up as a doc for your design notes and roadmap, I can
+  do that.
+
+❯ This session is only going to be used for planning. Let's focus on the
+  coaching before puzzles. I agree with your 5 points and to touch on 4, yes
+  the bot should be beatbale and to make it simple, we should just have levels
+  to the bot like easy, medium, hard.
+
+  for the open questions...
+  no practice games dont need to be saved for now. Yes, let's make it a toggle
+  off by default
+
+⏺ Next I'll check the component props, routing and types that the plan depends
+  on.
+
+⏺ Bash(grep -n "interface Props" -A 25 frontend/src/components/Board.tsx | head
+      -40; echo ---; grep -n "interface Props" -A 10
+      frontend/src/components/EvalBar.tsx; ech…)
+  ⎿  (No output)
+
+⏺ Bash(sed -n 1,40p frontend/src/components/Board.tsx; echo ---; sed -n 1,25p
+      frontend/src/components/EvalBar.tsx; echo; grep -n "coachLine" -r
+      frontend/src; sed -n 10…)
+  ⎿  (No output)
+
+⏺ Below is the full plan for the coached practice mode, detailed enough to hand
+  to the session that implements it.
+
+  Coached Practice: implementation plan
+
+  What the player experiences
+
+  1. From Learn, they choose Easy / Medium / Hard and a color (Black / White /
+     Random).
+  2. On their turn, the engine scores every legal move in the background. They
+     can ask for a Hint (the idea behind the best move) or Show best (a ring on
+     the best square).
+  3. They play a move and get an instant grade in the coach bubble, e.g. "c4 is
+     a mistake: gives away about 6 discs. f5 was best. This move opens a corner
+     for the opponent."
+  4. After a best or good move, the bot replies after about 1s. After an
+     inaccuracy or worse, the bot waits until they choose Take back or Continue.
+  5. Undo works at any point and always goes back to their previous turn.
+  6. At game over they see a final score plus accuracy and move-class counts,
+     using the same summarize() as Review. "New game" starts again.
+  7. The eval bar toggle is off by default and remembered per browser in
+     localStorage, wrapped in try/catch.
+
+  No backend, no login, no saved games. The page never touches GameClient, so it
+  also works in mock mode.
+
+  Architecture
+
+  File: shared/src/engine/analyze.ts
+  Change: Move the per-move body of analyzeGame into an exported
+  gradeMove(board,
+  player, square, searchResult): PlyAnalysis. analyzeGame calls it. Behavior is
+   unchanged and the existing tests guard it. Review and Practice then grade
+  moves with the same code.
+  ────────────────────────────────────────
+  File: shared/src/engine/bot.ts (new)
+  Change: chooseBotMove(board, player, level, rng) plus a BOT_LEVELS config
+  table
+  ────────────────────────────────────────
+  File: shared/src/practice.ts (new)
+  Change: A pure reducer for the practice game (spec below)
+  ────────────────────────────────────────
+  File: frontend/src/engine/engine.worker.ts (new)
+  Change: A Web Worker. It handles analyze requests (a full search with
+  ANALYSIS_SEARCH_OPTIONS) and botMove requests.
+  ────────────────────────────────────────
+  File: frontend/src/data/usePracticeGame.ts (new)
+  Change: Connects the reducer to the worker, holds the cache of scored
+  positions, and runs the bot's reply delay
+  ────────────────────────────────────────
+  File: frontend/src/pages/PracticePage.tsx (new)
+  Change: Reuses Board (its bestSquare, ghost and lastMove props already cover
+  this), EvalBar, CoachBubble and PlayerBar
+  ────────────────────────────────────────
+  File: App.tsx (frontend/src/App.tsx)
+  Change: Add a /practice?level=easy&color=B route
+  ────────────────────────────────────────
+  File: LearnPage.tsx (frontend/src/pages/LearnPage.tsx)
+  Change: Replace the four disabled buttons (Beginner / Casual / Club / Expert)
+  with Easy / Medium / Hard links and remove the ComingSoon badge
+
+  Two searches with different jobs:
+  - The coach search always uses ANALYSIS_SEARCH_OPTIONS, whatever the level. A
+    grade in practice therefore means exactly what it means in Review.
+  - The bot search uses the level's settings. Only the coach search drives the
+    grades.
+
+  Bot levels (starting values, tune them afterwards)
+
+  ┌────────┬──────────────────────────────────┬─────────────────────────────┐
+  │ Level  │              Search              │     How it picks a move     │
+  ├────────┼──────────────────────────────────┼─────────────────────────────┤
+  │        │                                  │ At random from its top 4    │
+  │ Easy   │ depth 2, no exact endgame solve  │ moves that lose 10 discs or │
+  │        │                                  │  fewer                      │
+  ├────────┼──────────────────────────────────┼─────────────────────────────┤
+  │        │ depth 4, solves exactly at 8     │ At random from its top 2    │
+  │ Medium │ empties or fewer                 │ moves within 3 discs of its │
+  │        │                                  │  best                       │
+  ├────────┼──────────────────────────────────┼─────────────────────────────┤
+  │ Hard   │ ANALYSIS_SEARCH_OPTIONS          │ Always its best move        │
+  └────────┴──────────────────────────────────┴─────────────────────────────┘
+
+  The random choice comes from an rng passed in, so tests are repeatable. To
+  check the tuning, extend bench-analysis.ts (backend/scripts/bench-analysis.ts)
+  or add a small bot-vs-bot script: Hard should beat Easy nearly every game,
+  and Medium should win most games against Easy. Add those numbers to the "Tuned
+  values" section of the contract-deviations doc, alongside the other tuned
+  constants.
+
+  Reducer (shared/src/practice.ts)
+
+  interface PracticeState {
+    human: Player; level: BotLevel;
+    moves: Move[];                 // accepted line, including passes
+    grades: Record<number, PlyAnalysis>; // by ply, human moves only
+    awaitingDecision: boolean;     // after inaccuracy+, bot waits
+    revealed: 'none' | 'hint' | 'best';
+    stats: { takebacks: number; hintsUsed: number };
+  }
+  // actions: humanMove, gradeArrived, botMove, pass (auto), undo, continue,
+  reveal
+
+  The board is recomputed from moves rather than stored, so state stays small
+  and undo has nothing to go out of sync with.
+
+  Undo removes moves until the last one removed was the human's, which puts the
+  player back at their previous turn. That covers undoing before the bot
+  replies, after it replies, and across passes.
+
+  Passes are applied automatically, using nextTurn from rules.ts
+  (shared/src/engine/rules.ts). The game ends when nextTurn returns null.
+
+  Edge cases to handle deliberately
+
+  - The player moves before the analysis finishes. Apply the move right away and
+    show "Coach is thinking…" in the bubble. Grade it when the result arrives.
+  - Outdated worker results. Key every request by the moves so far (or a hash of
+    the position). Drop any result whose key no longer matches, which happens
+    after an undo or a new game.
+  - Hints are cached per position, so undoing and replaying costs nothing.
+  - A forced move (only one legal option) gets graded "forced", not praised as
+    "best". gradeMove already does this.
+  - Hint wording. If the best move has the took_corner motif, say "A corner is
+    available." Otherwise, name the quarter of the board and one sentence of
+    reasoning. Simple rules are fine; this is not LLM territory.
+
+  CoachBubble
+
+  It currently shows an "AI coach preview" label whenever the AI coach is off.
+  Practice needs it without that label, so add a small variant prop, or move
+  coachLine into its own module. The other session is working on the coach, so
+  make this edit last and keep it small to avoid a merge conflict.
+
+  Tests (all in shared, where your test setup already is)
+
+  - gradeMove: the existing analyze tests still pass after the refactor.
+  - bot: always returns a legal move; Hard always plays the engine's best; Easy
+    never exceeds its loss limit; the same seed gives the same move.
+  - practice reducer: undo before and after the bot's reply, undo across a pass,
+    game end, awaitingDecision switched on by a bad grade, and "continue"
+    clearing it.
+
+  Commit order (each commit leaves the app working)
+
+  1. Refactor: extract gradeMove
+  2. Bot levels + tests
+  3. Practice reducer + tests
+  4. Engine worker + usePracticeGame
+  5. Practice page, route and Learn card wiring
+  6. Docs: the edge story, a roadmap entry, and the prompts saved to
+     docs/ai-usage/
+
+  Estimate
+
+  About 75–90 minutes. The worker together with outdated-result handling is the
+  part most likely to run over. If time gets tight, drop Hint and keep Show
+  best, which costs almost nothing since the scores are already computed.
+
+  Roadmap items this plan sets up
+
+  - Saving practice games to feed the skill profile
+  - An LLM "Explain why" button on any graded move, reusing CoachService
+  - Practice from a position: start from a mistake in Review and play it out
+    against the bot
+  - Puzzles, which reuse gradeMove and the worker without changes
+
+  Want me to write this as a handoff prompt for the implementation session and
+  save it to docs/ai-usage/ alongside your other prompts?
+
+❯ I want to touch on part 4 in the plan.... "After an inaccuracy or worse, the
+  bot waits until they choose Take back or Continue." discribe how this would
+  work excatly... I want to make sure this is a smooth process. I dont want
+  then to have to always click continue after making a move.
+
+⏺ You're right. Making the player click Continue after every bad move is
+  friction, and they'd hit it most often exactly when they're struggling. I'd
+  drop the forced pause.
+
+  Revised flow: the bot never blocks
+
+  Take back already works after the bot has replied, because undo removes both
+  the bot's move and the player's. So there's no need to stop the game for the
+  player to decide. The bot always replies on its own, and the only thing that
+  changes is how long it waits.
+
+  After every move:
+  1. The player's disc lands and the grade appears in the coach bubble straight
+     away. The position was scored while they were thinking, so there's no wait.
+  2. A short delay runs. Its length depends on the grade:
+
+  ┌────────────────────┬────────────────────────────────────────────────────┐
+  │       Grade        │            Delay before the bot replies            │
+  ├────────────────────┼────────────────────────────────────────────────────┤
+  │ Best / Good /      │ ~0.5s (feels like a normal game)                   │
+  │ Forced             │                                                    │
+  ├────────────────────┼────────────────────────────────────────────────────┤
+  │ Inaccuracy         │ ~1.2s                                              │
+  ├────────────────────┼────────────────────────────────────────────────────┤
+  │ Mistake / Blunder  │ ~2.5s, with a small progress ring on the Take back │
+  │                    │  button                                            │
+  └────────────────────┴────────────────────────────────────────────────────┘
+
+  3. The bot plays. The grade of the player's move stays in the bubble until
+     their next move, so they can still read it after the bot replies.
+
+  What the player can do at any moment (all optional):
+
+  ┌───────────────┬─────────────────────────┬──────────────────────────────┐
+  │    Action     │ Before the bot replies  │    After the bot replies     │
+  ├───────────────┼─────────────────────────┼──────────────────────────────┤
+  │ Take back     │ Cancels the bot's reply │ Removes the bot's move and   │
+  │ (button or ←) │  and removes their move │ theirs                       │
+  ├───────────────┼─────────────────────────┼──────────────────────────────┤
+  │ Show best /   │ Pauses the bot and      │ Shows the best move for the  │
+  │ Hint          │ shows the answer        │ position the player is now   │
+  │               │                         │ in                           │
+  ├───────────────┼─────────────────────────┼──────────────────────────────┤
+  │ Nothing       │ The bot replies when    │ They play on                 │
+  │               │ the delay ends          │                              │
+  └───────────────┴─────────────────────────┴──────────────────────────────┘
+
+  The only pause comes from the player. Clicking Show best or Hint while the bot
+  is waiting to reply means they're studying the position, so the bot waits. In
+  just that case, a Reply button appears (Space also works) to let the bot
+  move. Someone who never asks for help never sees a pause or a button.
+
+  Example timelines
+
+  - Normal move: play f5, see "f5 is best", and the bot answers about 0.5s
+    later. No clicks beyond the move itself.
+  - Blunder, player moves on: play b2, see "b2 is a blunder: opens the a1
+    corner. c4 was best", and the bot answers after about 2.5s. The player keeps
+    going.
+  - Blunder, player wants to learn: play b2, see the blunder grade, and click
+    Show best within the delay. The bot pauses and a ring appears on c4. The
+    player takes back and plays c4, which is graded "best", and the bot replies.
+  - Player notices after the bot replied: the bot has already taken a1. The
+    player presses Take back, which removes a1 and b2, and they're back at their
+    turn to try again.
+
+  Timing details to get right
+
+  - The delay starts only once the grade is on screen. If the player moved
+    before scoring finished, the timer waits for the grade, so the bot never
+    moves before they've seen feedback.
+  - The bot computes during the delay. Its reply appears when both the delay has
+    passed and its search is done. On Hard, the search usually fits inside the
+    delay, so it doesn't add waiting time.
+  - Every timer and worker result is tied to the position. After a take back,
+    any pending bot reply or late result for the old position is ignored, so the
+    board can't jump after an undo.
+
+  Changes to the earlier plan
+
+  - Reducer: remove awaitingDecision, add paused: boolean (set by Hint or Show
+    best while a reply is pending, cleared by Reply or Take back), and replace
+    the continue action with resume.
+  - Hook: add the delay-by-grade table (a REPLY_DELAY_MS table next to
+    BOT_LEVELS), the cancellable timer, and the rule that waits for the grade
+    before starting the timer.
+  - Page: remove the Continue button; add the progress ring on Take back for
+    mistakes and blunders; show the Reply button only when paused.
+  - Tests: a pending reply is cancelled by Take back; Show best while pending
+    pauses the bot and Reply resumes it; Take back after the bot replies removes
+    two moves. The timer itself belongs in the hook, not the reducer, so the
+    tests only need to cover the state changes.
+
+  One possible later addition is a "Pause after mistakes" setting (off by
+  default) for players who want the old behavior. I'd leave it out of this
+  build.
+
+❯ ok with these changes made give me the update plan
+
+⏺ Coached Practice: implementation plan (updated)
+
+  Goal
+
+  The player practises against a bot they can beat. After every move they get an
+  instant grade from the same engine as Game Review, and they can ask for a
+  hint, see the best move, or take a move back. Nothing ever forces them to stop
+  and click.
+
+  Scope decisions made so far:
+  - Bot levels are Easy, Medium and Hard.
+  - Practice games are not saved.
+  - The eval bar is a toggle, off by default.
+  - No backend, no login, no LLM. The page never uses GameClient, so it also
+    works in mock mode.
+
+  What the player experiences
+
+  Setup: From Learn, they choose Easy / Medium / Hard and a color (Black / White
+  / Random). If they play White, the bot moves first.
+
+  On their turn: A Web Worker scores every legal move in the background. They
+  can:
+  - click Hint for the idea behind the best move, e.g. "A corner is available."
+  - click Show best to put a ring on the best square.
+
+  After they move:
+  1. The grade appears in the coach bubble straight away, e.g. "c4 is a mistake:
+     gives away about 6 discs. f5 was best. This move opens a corner for the
+     opponent."
+  2. The bot replies on its own after a delay that depends on the grade:
+
+  ┌──────────────────────┬──────────────────────────────────────────┐
+  │        Grade         │       Delay before the bot replies       │
+  ├──────────────────────┼──────────────────────────────────────────┤
+  │ Best / Good / Forced │ ~0.5s                                    │
+  ├──────────────────────┼──────────────────────────────────────────┤
+  │ Inaccuracy           │ ~1.2s                                    │
+  ├──────────────────────┼──────────────────────────────────────────┤
+  │ Mistake / Blunder    │ ~2.5s, with a progress ring on Take back │
+  └──────────────────────┴──────────────────────────────────────────┘
+
+  3. The grade of their move stays in the bubble until their next move, so they
+     can still read it after the bot replies.
+
+  Controls, available at any moment:
+
+  ┌────────────────┬───────────────────────────┬────────────────────────────┐
+  │     Action     │  Before the bot replies   │   After the bot replies    │
+  ├────────────────┼───────────────────────────┼────────────────────────────┤
+  │ Take back      │ Cancels the bot's reply   │ Removes the bot's move and │
+  │ (button or ←)  │ and removes their move    │  theirs                    │
+  ├────────────────┼───────────────────────────┼────────────────────────────┤
+  │ Hint / Show    │ Pauses the bot and shows  │ Shows the answer for the   │
+  │ best           │ the answer                │ position they're now in    │
+  ├────────────────┼───────────────────────────┼────────────────────────────┤
+  │ Nothing        │ The bot replies when the  │ They play on               │
+  │                │ delay ends                │                            │
+  └────────────────┴───────────────────────────┴────────────────────────────┘
+
+  When they're paused, a Reply button appears (Space also works) to let the bot
+  move. Someone who never asks for help never sees a pause or a button.
+
+  Game over: They see the final score, their accuracy and their move-class
+  counts, using summarize() like Review does, along with a "New game" button.
+
+  Eval bar: A toggle, off by default, remembered per browser in localStorage
+  (wrapped in try/catch).
+
+  Architecture
+
+  File: shared/src/engine/analyze.ts
+  Change: Move the per-move body of analyzeGame into an exported
+  gradeMove(board,
+  player, square, searchResult): PlyAnalysis. analyzeGame calls it. Behavior is
+   unchanged and the existing tests guard it.
+  ────────────────────────────────────────
+  File: shared/src/engine/bot.ts (new)
+  Change: BOT_LEVELS and chooseBotMove(board, player, level, rng)
+  ────────────────────────────────────────
+  File: shared/src/practice.ts (new)
+  Change: The pure reducer (spec below) and the REPLY_DELAY_MS table (delay by
+  grade)
+  ────────────────────────────────────────
+  File: frontend/src/engine/engine.worker.ts (new)
+  Change: Handles two requests: analyze (a full search with
+  ANALYSIS_SEARCH_OPTIONS) and botMove (a search with the level's settings)
+  ────────────────────────────────────────
+  File: frontend/src/data/usePracticeGame.ts (new)
+  Change: Connects the reducer to the worker. Holds the cache of scored
+  positions, the cancellable reply timer, and the rule that the timer waits for
+   the grade.
+  ────────────────────────────────────────
+  File: frontend/src/pages/PracticePage.tsx (new)
+  Change: Reuses Board (bestSquare, ghost, lastMove), EvalBar, CoachBubble and
+  PlayerBar. Has the Take back / Hint / Show best / Reply controls and the eval
+   toggle.
+  ────────────────────────────────────────
+  File: App.tsx (frontend/src/App.tsx)
+  Change: Add a /practice?level=easy&color=B route
+  ────────────────────────────────────────
+  File: LearnPage.tsx (frontend/src/pages/LearnPage.tsx)
+  Change: The "Practice vs AI" card gets Easy / Medium / Hard links in place of
+  the disabled buttons, and loses its ComingSoon badge
+  ────────────────────────────────────────
+  File: CoachBubble.tsx (frontend/src/components/CoachBubble.tsx)
+  Change: Add a small variant="practice" prop that hides the "AI coach preview"
+  label. Do this last: the other session is working on the coach.
+
+  Two searches with different jobs:
+  - The coach search always uses ANALYSIS_SEARCH_OPTIONS, so a grade in practice
+    means exactly what it means in Review.
+  - The bot search uses the level's settings. Only the coach search drives the
+    grades.
+
+  Bot levels (starting values, tune them afterwards)
+
+  ┌────────┬──────────────────────────────────┬─────────────────────────────┐
+  │ Level  │              Search              │     How it picks a move     │
+  ├────────┼──────────────────────────────────┼─────────────────────────────┤
+  │        │                                  │ At random from its top 4    │
+  │ Easy   │ depth 2, no exact endgame solve  │ moves that lose 10 discs or │
+  │        │                                  │  fewer                      │
+  ├────────┼──────────────────────────────────┼─────────────────────────────┤
+  │        │ depth 4, solves exactly at 8     │ At random from its top 2    │
+  │ Medium │ empties or fewer                 │ moves within 3 discs of its │
+  │        │                                  │  best                       │
+  ├────────┼──────────────────────────────────┼─────────────────────────────┤
+  │ Hard   │ ANALYSIS_SEARCH_OPTIONS          │ Always its best move        │
+  └────────┴──────────────────────────────────┴─────────────────────────────┘
+
+  The random choice uses an rng passed in, so tests are repeatable. To check the
+  tuning, add a quick bot-vs-bot script next to bench-analysis.ts
+  (backend/scripts/bench-analysis.ts): Hard should beat Easy nearly every game,
+  and Medium should win most games against Easy. Record the numbers under "Tuned
+  values" in the contract-deviations doc.
+
+  Reducer (shared/src/practice.ts)
+
+  interface PracticeState {
+    human: Player;
+    level: BotLevel;
+    moves: Move[];                        // accepted line, incl. passes; board
+  is derived
+    grades: Record<number, PlyAnalysis>;  // by ply, human moves only
+    revealed: 'none' | 'hint' | 'best';   // resets on every new position
+    paused: boolean;                      // set by hint/best while a bot reply
+  is pending
+    stats: { takebacks: number; hintsUsed: number; bestShown: number };
+  }
+
+  type Action =
+    | { type: 'humanMove'; square: Square }
+    | { type: 'gradeArrived'; key: string; grade: PlyAnalysis }
+    | { type: 'botMove'; key: string; square: Square }
+    | { type: 'reveal'; level: 'hint' | 'best' }
+    | { type: 'resume' }
+    | { type: 'takeBack' }
+    | { type: 'newGame'; human: Player; level: BotLevel };
+
+  Rules:
+  - The board is always recomputed from moves, never stored.
+  - Passes are added automatically with nextTurn from rules.ts
+    (shared/src/engine/rules.ts). The game ends when nextTurn returns null.
+  - Take back removes moves until the last one removed was the human's. That
+    covers taking back before the bot replies, after it replies, and across a
+    pass. It also clears paused and revealed.
+  - Keys: gradeArrived and botMove carry a key for the position they were
+    computed for (the moves so far, or a hash of them). The reducer ignores any
+    whose key doesn't match the current position. This protects against outdated
+    results arriving after a take back or new game.
+  - Pausing: reveal while the bot's reply is pending sets paused. resume clears
+    it.
+
+  The reply timer (in the hook, not the reducer)
+
+  1. The player moves and the move is applied immediately.
+  2. Wait for the grade: it comes from the cache if the position was already
+     scored, otherwise from the worker, with "Coach is thinking…" shown in the
+     meantime.
+  3. Look up the delay for that grade in REPLY_DELAY_MS.
+  4. Ask the worker for the bot's move at the same time the delay starts.
+  5. The bot plays when both the delay has passed and its move is ready, as long
+     as the game isn't paused.
+  6. The timer is tied to the current position's key and cancelled on take back,
+     new game or leaving the page.
+
+  Hint wording
+
+  - If the best move has the took_corner motif: "A corner is available."
+  - Otherwise: name the quarter of the board the best move is in, plus one
+    sentence from its motifs, or a line about mobility.
+
+  Plain rules like these are enough; no LLM is needed.
+
+  Tests (all in shared)
+
+  - gradeMove: the existing analyze tests still pass after the refactor.
+  - bot:
+    - it always returns a legal move;
+    - Hard always plays the engine's best move;
+    - Easy never exceeds its loss limit;
+    - the same seed gives the same move.
+  - practice reducer:
+    - take back before the bot replies removes 1 move;
+    - take back after the bot replies removes 2 moves;
+    - take back works across a pass;
+    - Hint or Show best while a reply is pending sets paused, and resume clears
+      it;
+    - results with an outdated key are ignored;
+    - the game ends correctly;
+    - revealed resets when the position changes.
+
+  Commit order (each commit leaves the app working)
+
+  1. Refactor: extract gradeMove from analyzeGame
+  2. Bot levels + tests
+  3. Practice reducer + tests
+  4. Engine worker + usePracticeGame (cache, timer, keys)
+  5. Practice page, route and Learn card wiring
+  6. The CoachBubble variant prop (last, because of the other session)
+  7. Docs: the edge story in the design notes, a roadmap entry, the bot tuning
+     numbers, and the prompts saved to docs/ai-usage/
+
+  Estimate
+
+  About 75–90 minutes. The part most likely to run over is the worker plus the
+  timer and outdated-result handling. If time gets tight, drop Hint first (Show
+  best costs almost nothing) and then the progress ring.
+
+  Out of scope (goes in the roadmap)
+
+  - Saving practice games to feed the skill profile on Learn
+  - An LLM "Explain why" button on any graded move, reusing CoachService
+  - Practice from a position: start from a mistake in Review and play it out
+    against the bot
+  - A "Pause after mistakes" setting
+  - Puzzles, which reuse gradeMove and the worker without changes
+
+  I can turn this into a handoff prompt for the implementation session and save
+  it to docs/ai-usage/ alongside your other prompts.
+
+❯ I think a big value add that shouldnt take too much work would be adding "An
+  LLM "Explain why" button on any graded move, reusing CoachService"... we are
+  already building this for the Game Review so we should be able to reuse,
+  correct?
+
+⏺ Mostly, but the Review coach is built around a saved game, and practice games
+  aren't saved. I'll check how much of it carries over.
+
+⏺ Bash(cat backend/src/coach/CoachService.ts backend/src/coach/prompt.ts; sed -n
+      80,198p shared/src/coach.ts; git diff backend/src/http/routes.ts
+      backend/src/config.ts…)
+  ⎿  (No output)
+
+⏺ Partly. Everything that makes the explanation good carries over. What doesn't
+  carry over is the plumbing, because the Review coach is built around a saved
+  game and practice games aren't saved.
+
+  What carries over from the Review coach
+
+  Piece: momentFacts() in coach.ts (shared/src/coach.ts)
+  Reuse?: Yes, nearly unchanged
+  Notes: It already builds a fact sheet for one move from a PlyAnalysis: square
+  types, mobility verdict, corners opened, motifs, top moves. gradeMove
+  produces exactly that input. It only needs exporting, e.g. as buildMoveFacts.
+  ────────────────────────────────────────
+  Piece: The prompt's "how to read the facts" and "rules" sections in prompt.ts
+  (backend/src/coach/prompt.ts)
+  Reuse?: Yes
+  Notes: That's the hard-won part: not trusting the diagram, when mobility can
+  be
+  used as a reason, how to handle exact endgame solves, pronouns. Split it into
+   a shared FACTS_GUIDE string used by both prompts. If the debrief prompt's
+  text stays identical, PROMPT_VERSION doesn't need bumping.
+  ────────────────────────────────────────
+  Piece: The Anthropic client, COACH_MODEL, structured output with zod, the
+  COACH_UNAVAILABLE / enabled handling
+  Reuse?: Yes
+  Notes: Same setup as the debrief
+  ────────────────────────────────────────
+  Piece: The output shape
+  Reuse?: Yes
+  Notes: A CoachMoment (title / explanation / lesson) is exactly what one move
+  needs, and CoachBubble (frontend/src/components/CoachBubble.tsx) already
+  renders it through its moment prop, including the "AI coach" badge.
+  ────────────────────────────────────────
+  Piece: groundMoments checks
+  Reuse?: Partly
+  Notes: Keep the part that rejects squares not in the facts. The ply-matching
+  part doesn't apply to a single move.
+  ────────────────────────────────────────
+  Piece: GET/POST /api/games/:id/coach endpoints
+  Reuse?: No
+  Notes: Both need a gameId and read stored analysis
+  ────────────────────────────────────────
+  Piece: The coach_debriefs table
+  Reuse?: No
+  Notes: Its key includes game_id, which references games
+  ────────────────────────────────────────
+  Piece: writeDebrief
+  Reuse?: No
+  Notes: Tied to the debrief schema, though the new function follows the same
+  pattern
+
+  What to add
+
+  Endpoint: POST /api/coach/explain
+  - Request: { moves: Move[], ply: number }, the practice game up to and
+    including the move to explain.
+  - Server steps:
+    a. Replay moves with the rules engine; reject the request if any move is
+       illegal.
+    b. Search the position before the move.
+    c. gradeMove, then buildMoveFacts.
+    d. One Claude call returning { title, explanation, lesson }.
+    e. Check the squares it names against the facts.
+  - Response: a CoachMoment.
+
+  The server recomputes everything and trusts no grades or evals from the
+  client. That keeps "the engine is the source of truth" true for this endpoint
+  too. It also means the only free text reaching the prompt is squares the
+  server generated itself, so there's nothing for a user to inject.
+
+  Enabled check: GET /api/coach returns { enabled }. The existing enabled flag
+  comes back on a per-game request, and practice has no game. When it's false,
+  hide the Explain button.
+
+  Cost protection. This is a public endpoint that triggers a paid Claude call,
+  and the debrief currently has at most one call per game per player. So add:
+  - an in-memory cache keyed by position + move + prompt version, so the same
+    position explained twice costs one call;
+  - a simple per-IP rate limit, e.g. 20 per hour.
+
+  A database table for the cache can wait until practice games are saved.
+
+  Client: add explainMove(moves, ply) to the GameClient interface, with an
+  httpClient version and a canned mockClient version so mock mode still works.
+
+  How it fits the practice flow
+
+  - An Explain why button sits in the bubble next to the template grade. It's
+    available for any non-forced move.
+  - Clicking it while the bot is waiting to reply pauses the bot, just like Hint
+    or Show best.
+  - Expect roughly 2–4 seconds. The bubble shows "Coach is thinking…", then the
+    explanation replaces the template text, with the "AI coach" badge.
+  - The explanation stays until the next move. Explaining the same position
+    again is instant thanks to the cache.
+
+  Where it lands in the plan
+
+  Two new commits after the practice page:
+
+  8. Backend: export buildMoveFacts, split out FACTS_GUIDE, add an explain
+     prompt and schema, CoachService.explainMove, the two routes, the cache and
+     the rate limit. Tests cover buildMoveFacts on a graded move (in shared) and
+     that illegal move lists are rejected.
+  9. Frontend: explainMove in the client and mock, the enabled check, and the
+     button with its loading state in the bubble.
+
+  Estimate: about 45–60 minutes, which brings the practice work to roughly 2–2.5
+  hours. That's over the ~2 hours your README has left for the edge, so
+  something has to give:
+  - (a) Build it and cut Hint and the progress ring.
+  - (b) Build it last and cut it first if time runs out.
+
+  I'd go with (b). The practice mode stands on its own without it, while this
+  button is the clearest link between "AI coach" and practice.
+
+  Coordination: coach.ts, prompt.ts and CoachService.ts are the files the other
+  session is actively changing. Do step 8 only after that session has committed,
+  or ask it to add the buildMoveFacts export and the FACTS_GUIDE split while
+  it's in there, since both are small.
+
+❯ ok you are right, give me a prompt to give to the another session to build
+  out the practice mode. Include the idea and our thought process behind
+  integrating an LLM, but ensure to say that it is just a placeholder for now
+
+⏺ Written for: the Claude Code session that will build practice mode, which has
+  none of this conversation's context.
+
+  # Build: Coached Practice mode (play vs. bot with live engine coaching)
+
+  ## Context
+  This is the Othello take-home (see README.md and docs/). Our competitive edge
+  over eothello.com is **coaching**: one engine and one vocabulary used
+  everywhere. Game Review diagnoses your games, Practice drills you live, and
+  Puzzles (later) repeat your own mistakes. Another session is building the AI
+  debrief for Game Review (`shared/src/coach.ts`, `backend/src/coach/*`,
+  `backend/src/db/coachRepo.ts`, migration 006). **Do not edit those files.**
+  Your task is Practice mode, inspired by chess.com's coach: you play a bot,
+  every move is graded immediately, and you can get a hint, see the best move,
+  or take a move back.
+
+  Before writing code, read these so you build on what exists:
+  - `shared/src/engine/analyze.ts`: `analyzeGame`, `classify`,
+  `CLASS_THRESHOLDS`, `ANALYSIS_SEARCH_OPTIONS`
+  - `shared/src/engine/search.ts`: `search()` scores every legal move
+  - `shared/src/engine/motifs.ts`, `shared/src/engine/rules.ts` (`nextTurn`,
+  `applyMove`, `getLegalMoves`)
+  - `frontend/src/components/Board.tsx` (`bestSquare`, `ghost`, `lastMove`,
+  `legalMoves` props), `EvalBar.tsx`, `CoachBubble.tsx` (its `coachLine`
+  template), `PlayerBar.tsx`
+  - `frontend/src/pages/LearnPage.tsx` (the "Practice vs AI" card) and
+  `frontend/src/App.tsx` (routes)
+
+  ## Decisions already made (don't revisit them)
+  - Bot levels: **Easy / Medium / Hard**. The bot must be beatable.
+  - **Practice games are not saved.** No backend, no login, no DB. The practice
+  page does not use `GameClient`, so it also works in mock mode.
+  - **Grading is engine-only**, reusing `classify` and motifs, so a grade means
+  exactly what it means in Review. No LLM call per move.
+  - **The eval bar is a toggle, off by default**, remembered per browser in
+  localStorage (wrap every read and write in try/catch).
+  - **The bot never blocks the player.** There is no "Continue" button in the
+  normal flow. Details below.
+
+  ## What the player experiences
+  1. From Learn they choose a level and a color (Black / White / Random). If
+  they play White, the bot moves first.
+  2. On their turn, a Web Worker scores every legal move in the background. They
+  can click **Hint** (the idea behind the best move) or **Show best** (a ring
+  on the best square).
+  3. They move. The grade appears in the coach bubble straight away, e.g. "c4 is
+  a mistake: gives away about 6 discs. f5 was best. This move opens a corner
+  for the opponent."
+  4. The bot replies **on its own** after a delay that depends on the grade:
+     - Best / Good / Forced: ~500ms
+     - Inaccuracy: ~1200ms
+     - Mistake / Blunder: ~2500ms, with a progress ring on the Take back button
+  5. The grade of their move **stays in the bubble** after the bot replies,
+  until their next move.
+  6. Controls, available at any moment:
+     - **Take back** (button or ←): before the bot replies, it cancels the reply
+  and removes their move. After the bot replies, it removes both moves. The
+  player always lands back on their previous turn.
+     - **Hint / Show best**: if a bot reply is pending, this **pauses** the bot.
+  A **Reply** button (or Space) then appears to let the bot move. This is the
+  only pause, and only the player's action triggers it.
+  7. Game over: final score plus accuracy and move-class counts from
+  `summarize()`, and a New game button.
+
+  ## Architecture
+  | File | Change |
+  |---|---|
+  | `shared/src/engine/analyze.ts` | Move the per-move body of `analyzeGame`
+  into an exported `gradeMove(board, player, square, searchResult):
+  PlyAnalysis`, and have `analyzeGame` call it. **No behavior change**; the
+  existing tests must pass unchanged. |
+  | `shared/src/engine/bot.ts` (new) | `BOT_LEVELS` config and
+  `chooseBotMove(board, player, level, rng)`. Pass `rng` in so tests are
+  repeatable. |
+  | `shared/src/practice.ts` (new) | Pure reducer plus a `REPLY_DELAY_MS` table
+  (delay by grade). Export from `shared/src/index.ts`. |
+  | `frontend/src/engine/engine.worker.ts` (new) | Handles two requests:
+  `analyze` (search with `ANALYSIS_SEARCH_OPTIONS`) and `botMove` (search with
+  the level's settings). Create it with `new Worker(new URL(...,
+  import.meta.url), { type: 'module' })`. |
+  | `frontend/src/data/usePracticeGame.ts` (new) | Connects the reducer to the
+  worker: cache of scored positions, the cancellable reply timer, pausing |
+  | `frontend/src/pages/PracticePage.tsx` (new) | Reuses `Board`, `EvalBar`,
+  `CoachBubble`, `PlayerBar` and the existing styles in `styles.css` |
+  | `frontend/src/App.tsx` | Route
+  `/practice?level=easy\|medium\|hard&color=B\|W\|random` |
+  | `frontend/src/pages/LearnPage.tsx` | In the Practice card, replace the four
+  disabled buttons with Easy / Medium / Hard links and remove its `ComingSoon`
+  badge |
+  | `frontend/src/components/CoachBubble.tsx` | **Last step, minimal diff:** a
+  `variant="practice"` prop that hides the "AI coach preview" label, plus the
+  Explain-why placeholder described below. The other session may touch this
+  file, so keep the change small. |
+
+  **Two searches with different jobs:**
+  - The **coach search** always uses `ANALYSIS_SEARCH_OPTIONS`, whatever the
+  level, and it alone produces the grades.
+  - The **bot search** uses the level's settings and never affects the grades.
+
+  ### Bot levels (starting values; tune them)
+  | Level | Search | How it picks a move |
+  |---|---|---|
+  | Easy | depth 2, `exactEmpties: 0` | At random from its top 4 moves that lose
+  10 discs or fewer |
+  | Medium | depth 4, `exactEmpties: 8` | At random from its top 2 moves within
+  3 discs of its best |
+  | Hard | `ANALYSIS_SEARCH_OPTIONS` | Always its best move |
+
+  Check the tuning with a quick bot-vs-bot script next to
+  `backend/scripts/bench-analysis.ts`. Hard should beat Easy nearly every game,
+  and Medium should win most games against Easy. Record the results under "Tuned
+  values" in `docs/contract-deviations.md`.
+
+  ### Reducer (`shared/src/practice.ts`)
+  ```ts
+  interface PracticeState {
+    human: Player;
+    level: BotLevel;
+    moves: Move[];                        // accepted line incl. passes; board
+  is DERIVED, never stored
+    grades: Record<number, PlyAnalysis>;  // by ply, human moves only
+    revealed: 'none' | 'hint' | 'best';   // resets whenever the position
+  changes
+    paused: boolean;                      // set by hint/best while a bot reply
+  is pending
+    stats: { takebacks: number; hintsUsed: number; bestShown: number };
+  }
+  type Action =
+    | { type: 'humanMove'; square: Square }
+    | { type: 'gradeArrived'; key: string; grade: PlyAnalysis }
+    | { type: 'botMove'; key: string; square: Square }
+    | { type: 'reveal'; level: 'hint' | 'best' }
+    | { type: 'resume' }
+    | { type: 'takeBack' }
+    | { type: 'newGame'; human: Player; level: BotLevel };
+  ```
+  - **Passes** are added automatically using `nextTurn`. The game ends when
+  `nextTurn` returns null.
+  - **takeBack** removes moves until the last one removed was the human's. That
+  covers taking back before the bot replies, after it replies, and across a
+  pass. It clears `paused` and `revealed`.
+  - **Keys:** `gradeArrived` and `botMove` carry the key of the position they
+  were computed for (derived from `moves`). Ignore any whose key doesn't match
+  the current position; these are outdated results arriving after a take back or
+  new game.
+
+  ### Reply timer (in the hook, not the reducer)
+  1. On the human's move, apply it immediately.
+  2. Wait until the grade is available: from the cache, otherwise from the
+  worker, showing "Coach is thinking…" meanwhile. The timer starts only once the
+  grade is visible, so the bot never moves before the player has seen feedback.
+  3. Start the delay from `REPLY_DELAY_MS` and request the bot's move at the
+  same time.
+  4. The bot plays when **both** the delay has passed **and** its move is ready,
+  unless `paused`.
+  5. Tie the timer to the position key, and cancel it on take back, new game or
+  unmount.
+  6. Start scoring the player's legal moves as soon as it becomes their turn, so
+  grades and Show best are instant.
+
+  ### Hint wording (plain rules, no LLM)
+  - If the best move has the `took_corner` motif: "A corner is available."
+  - Otherwise: name the quarter of the board the best move is in, plus one
+  sentence from its motifs, or a mobility line.
+
+  ## LLM "Explain why": PLACEHOLDER ONLY in this build
+  **Do not implement the backend for this.** Only render a disabled **Explain
+  why** button in the coach bubble on graded moves, with the existing
+  `ComingSoon` badge. Here's the idea, so the placeholder fits it and so you can
+  add it to the roadmap:
+
+  - **Why an LLM here at all:** the template grade says *what* was wrong. An LLM
+  can explain *why* in plain language, using the same grounded approach as the
+  Review debrief. The engine decides what's right, and Claude only explains a
+  fact sheet; it never judges moves itself.
+  - **Why only on demand, never on every move:** per-move LLM calls would add
+  seconds of delay and cost to every move. Instant engine grades are the core
+  experience, and the LLM is an optional deeper layer.
+  - **What carries over from the Review coach:**
+    - `momentFacts()` in `shared/src/coach.ts` already builds a fact sheet for
+  one move from a `PlyAnalysis`, which `gradeMove` produces;
+    - the prompt's "how to read the facts" and "rules" sections;
+    - the Anthropic client, `COACH_MODEL` and structured output;
+    - the `CoachMoment` shape (`title` / `explanation` / `lesson`), which
+  `CoachBubble` already renders.
+  - **What can't be reused:** the `/api/games/:id/coach` endpoints and the
+  `coach_debriefs` table both require a saved game, and practice games aren't
+  saved.
+  - **Planned design:** `POST /api/coach/explain` with `{ moves, ply }`. The
+  server replays the moves (rejecting illegal ones), searches, then calls
+  `gradeMove`, `buildMoveFacts` and Claude, and checks the squares Claude names
+  against the facts. It trusts nothing from the client except the moves, which
+  also leaves nothing to inject into the prompt. Other parts:
+    - `GET /api/coach` returns `{ enabled }` so the button can be hidden;
+    - an in-memory cache keyed by position + move + prompt version;
+    - a per-IP rate limit, since this is a public endpoint behind a paid API;
+    - `explainMove` on `GameClient`, with a canned mock version.
+  - **UX when it's built:** clicking Explain while a reply is pending pauses the
+  bot, like Hint. The explanation replaces the template text with the "AI
+  coach" badge and stays until the next move.
+  - **Why it's deferred:** it touches files the other session owns (`coach.ts`,
+  `prompt.ts`, `CoachService.ts`), and the time budget is tight. It comes after
+  the debrief work is committed.
+
+  ## Tests (in `shared`, using its existing test setup)
+  - **`gradeMove` refactor:** the existing `analyze` tests pass unchanged.
+  - **`bot`:**
+    - it always returns a legal move;
+    - Hard always plays the engine's best move;
+    - Easy never exceeds its loss limit;
+    - the same seed gives the same move.
+  - **`practice` reducer:**
+    - take back before the bot replies removes 1 move;
+    - take back after the bot replies removes 2 moves;
+    - take back works across a pass;
+    - reveal while a reply is pending sets `paused`, and `resume` clears it;
+    - results with an outdated key are ignored;
+    - the game ends correctly;
+    - `revealed` resets when the position changes.
+
+  ## Steps (one commit each; the app must work after every commit)
+  1. Refactor: extract `gradeMove` from `analyzeGame`
+  2. Bot levels + tests + bot-vs-bot tuning script
+  3. Practice reducer + tests
+  4. Engine worker + `usePracticeGame`
+  5. Practice page, route, Learn card wiring
+  6. The `CoachBubble` practice variant + the disabled Explain-why placeholder
+  7. Docs:
+     - Practice mode in the README and design notes, framed as the edge ("one
+  engine, one vocabulary");
+     - roadmap entries for LLM Explain why (the design above), saving practice
+  games for a skill profile, practicing from a mistake found in Review, and
+  puzzles reusing `gradeMove` and the worker;
+     - this prompt saved under `docs/ai-usage/`.
+
+  If time runs short, cut in this order: Hint (keep Show best), then the
+  progress ring. Run the app and play a full game on each level before calling
+  it done. Report anything in the plan that turned out to be wrong once you were
+  in the code.
+
+  A few things I set on my own that you may want to change before sending it:
+  - I read "placeholder" as a disabled Explain why button with a Coming Soon
+    badge, plus the full design in the roadmap. If you'd rather not show a
+    button at all, remove that line from the LLM section.
+  - I asked for one commit per step, since the brief grades commit history.
+  - I asked the session to save the prompt under docs/ai-usage/ itself.
+
+❯ I have plently of time remaining so no need to talk about cutting stuff if
+  time runs short
+
+⏺ Sure. Two lines in the prompt mention time pressure. Here are the
+  replacements.
+
+  1. At the very end, replace:
+
+  ▎ If time runs short, cut in this order: Hint (keep Show best), then the
+  ▎ progress ring. Run the app and play a full game on each level before calling
+  ▎ it done. Report anything in the plan that turned out to be wrong once you
+  ▎ were in the code.
+
+  with:
+
+  ▎ Run the app and play a full game on each level before calling it done.
+  ▎ Report anything in the plan that turned out to be wrong once you were in the
+  ▎ code.
+
+  2. In the LLM section, replace the "Why it's deferred" bullet with:
+
+  ▎ - Why it's deferred: it touches files the other session owns (coach.ts,
+  ▎ prompt.ts, CoachService.ts). It gets built once the debrief work is
+  ▎ committed.
+
+  Everything else stays the same, including Hint and the progress ring, which
+  are now simply part of the build.
+
+❯ I dont think I will have enough time to develop more than the practice mode
+  so as the instructions say... I want to:
+  "You will run out of time on something you think is important. When that
+  happens, put it in your roadmap
+  and explain how it fits into what you already built. A clear plan for the
+  piece you didn’t get to beats a rushed
+  version of it."
+
+  For the puzzles
+
+⏺ I'll check whether the README already has a roadmap section, so the puzzles
+  entry matches its style.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(sed -n 30,55p backend/migrations/001_init.sql; grep -n "7\.\|§7\|roadmap"
+      -i design-contract.md | head -20)
+  ⎿  (No output)
+
+⏺ Bash(sed -n 591,640p design-contract.md; ls docs)
+  ⎿  (No output)
+
+  Read 1 file (ctrl+o to expand)
+⏺ Written for: the Crosstie reviewers reading docs/roadmap.md.
+
+  Your design contract (§7.1) already lists "puzzles mined from your own
+  blunders" under Milestone 2, so this section fills that line out. It relies on
+  two things already in the schema: per-move analysis stored in moves, and
+  games.black_account_id / white_account_id from migration 002.
+
+  ## Puzzles: built from your own mistakes (designed, not built)
+
+  I ran out of time for puzzles, so I chose to finish Practice mode properly
+  rather than ship a rushed version of both. This is the plan, and it's cheap to
+  build because it reuses what is already there.
+
+  ### Why puzzles, and why these puzzles
+  A generic puzzle collection is content, and the incumbent wins on content. Our
+  edge is coaching: **one engine and one vocabulary** across the product. Game
+  Review diagnoses a game, Practice drills you live, and Puzzles close the loop
+  by **turning your own mistakes into exercises**. "You played b2 here and gave
+  away the corner. Find the better move." Every puzzle traces back to a game you
+  actually played.
+
+  ### What already exists that this builds on
+  | Existing piece | What puzzles get from it |
+  |---|---|
+  | `moves` table, analyzed per ply (`classification`, `loss`, `best_square`,
+  `candidates`, `motifs`, `is_exact`, `board_after`) | Every puzzle position and
+  its answer are already stored. Finding candidate puzzles is a SQL query, not
+  new engine work. |
+  | `games.black_account_id` / `white_account_id` | "Your" mistakes = moves by
+  the seat your account played |
+  | `gradeMove` + the engine Web Worker (Practice mode) | Grades a puzzle
+  attempt in the browser, with the same grades as Review and Practice |
+  | `motifs` (x_square, allowed_corner, missed_corner, …) | Puzzle themes, for
+  free |
+  | `Board` (`bestSquare`, `ghost`), `CoachBubble`, Show best | The puzzle UI is
+  mostly the practice screen without the bot |
+  | Planned `POST /api/coach/explain` (see the Practice roadmap entry) |
+  "Explain why" after a wrong answer, with no extra backend work |
+  | The sample corner puzzle on the Learn page | Replaced by real puzzles |
+
+  ### Design
+
+  **Step 1: "Your mistakes" (next up, about half a day)**
+  - **Selection:** your non-forced moves classified inaccuracy or worse, from
+  finished, analyzed games, most recent first.
+  - **Only puzzles with one clear answer:** keep a position only if the best
+  move beats the second-best by at least the mistake threshold (5 discs, from
+  the stored `candidates`). A puzzle with two nearly equal answers teaches
+  nothing and feels unfair.
+  - **Checking an answer:** accept any move graded `best` by `gradeMove` in the
+  worker, not only `best_square`. If two moves are equally strong, the player
+  isn't marked wrong for picking the other one. On a wrong answer, show the
+  grade, allow a retry, then offer Show best.
+  - **Trust labels:** positions with `is_exact` (12 or fewer empties, solved to
+  the end) are provably correct and labelled "Solved". Midgame puzzles rest on
+  the heuristic evaluation, which is why the clear-answer rule above matters.
+  - **No new tables:** puzzles are computed on the fly from `moves`. Attempts
+  are kept per browser only.
+
+  **Step 2: stored puzzles and progress (Milestone 2)**
+  - `puzzles (id, source_game_id, ply, board, player, answer_squares, themes,
+  is_exact, gap, engine_version, created_at)`, unique on `(source_game_id,
+  ply)`.
+  - `puzzle_attempts (account_id, puzzle_id, solved, tries, used_hint,
+  attempted_at)`.
+  - **Generation:** the `AnalysisRunner` inserts candidate puzzles when a game's
+  analysis finishes, plus a one-off script to fill them in for existing games.
+  - **Resurfacing missed puzzles:** a simple schedule, missed puzzles come back
+  after 1, 3, then 7 days.
+  - **A shared puzzle set:** good puzzles from all public games, so new players
+  have something to solve before they have a history.
+
+  **Step 3: skill profile and training plan (Milestone 2–3)**
+  - Motif-tagged attempts plus review motif counts become the skill bars on the
+  Learn page, which are sample data today. "Build my plan" then picks puzzles
+  and practice positions for your weakest themes.
+  - **Puzzles longer than one move:** a sequence you must play correctly move
+  after move, mostly from exactly solved endgames. This needs the search to
+  return its principal variation (the engine's best line), which it doesn't
+  today, since it only scores the moves in the current position.
+
+  ### Open questions (left open on purpose)
+  - **Guests:** puzzles from games played without an account? Seat tokens live
+  in one browser, so guests' puzzles would be tied to that browser only.
+  - **Difficulty:** per-puzzle ratings (like Lichess, which updates a puzzle's
+  rating from player results), or a simple heuristic from the size of the gap
+  and the number of empty squares? A rating is better but needs volume.
+  - **Engine upgrades:** a stronger engine (see bitboards / tuned evaluation)
+  could change a stored puzzle's answer. We store `engine_version` and plan to
+  re-check puzzles when it changes, but we haven't decided whether an outdated
+  puzzle is fixed or retired.
+  - **Privacy:** games are public today, so mining puzzles from other people's
+  games is allowed, but should they be anonymized by default?
+
+  A few notes on choices I made in the text:
+  - I called Step 1 "about half a day". Change it if your estimate is different.
+  - I referenced the planned /api/coach/explain as a roadmap entry of its own.
+    That only works if the Practice session adds that entry, which the handoff
+    prompt asks for.
+  - One idea worth mentioning in the interview: accepting any best-graded move
+    as correct, rather than only best_square. It's a small detail that shows
+    you've thought about how puzzles can be unfair.
+
+❯ ok now looking at the learn tab, correct me if I am wrong but the training
+  plan and lessons is not built yet either correct? If so I want to the same
+  the, but instead of creating this in markdown, just use normal paragraph
+  form. I am going to end up reviewing, checking, and writing this in my own
+  words for the final write
+
+⏺ I'll check the Learn page to confirm what's actually live.
+
+⏺ Bash(sed -n 60,140p frontend/src/pages/LearnPage.tsx)
+  ⎿  (No output)
+
+⏺ You're right, neither is built:
+
+  - Training plan: the "Build my plan" button is disabled with a Coming Soon
+    badge, and the skill bars are hardcoded SAMPLE_SKILLS. Nothing reads real
+    games.
+  - Lessons: "The rules" is the only lesson that works, and it just links to the
+    rules section on the home page. The other five are locked titles with a
+    one-line blurb and no content.
+  - Puzzles is still the single hand-picked corner position. Practice vs AI is
+    now wired to the practice launcher.
+
+  Written for: the Crosstie reviewers, as a draft for you to rework in your own
+  words.
+
+  ---
+
+  The Learn page shows a training plan and a set of lessons, but neither is
+  built yet. The training plan uses sample data and its "Build my plan" button
+  is disabled. Of the six lessons, only "The rules" works, and it links to the
+  rules section on the home page. I chose to spend my time on Practice mode
+  instead, because it gives a player something real to do today. Both pieces are
+  designed to reuse what is already built rather than start over, and this
+  section explains how.
+
+  The training plan is the piece that ties the product together. Review tells a
+  player what went wrong in one game. The plan looks across all their games,
+  finds the pattern, and sends them to the lesson, puzzle or practice position
+  that will help most. The incumbent has ratings and game history, but nothing
+  that turns your history into a next step, and that is the gap this fills.
+
+  Most of the data is already stored. Every analyzed move in the moves table has
+  its classification, disc loss, motifs and whether the position was solved
+  exactly. Accounts are linked to games through black_account_id and
+  white_account_id. A skill profile is therefore a query over rows we already
+  have, grouped by theme instead of by game. Corners would come from how often a
+  player misses a corner, hands one over, or plays an X-square next to an empty
+  one. Edges would come from C-square moves. Mobility would come from moves
+  where the coach's fact sheet already says the opponent's number of replies
+  explains the loss. Openings and Endgame would come from accuracy in those
+  phases, using the same phase boundaries as the coach. The endgame score is
+  especially reliable because most of those positions are solved exactly. Each
+  score would use the same accuracy formula as Review, restricted to the
+  relevant moves. Players would therefore see one consistent measure everywhere.
+
+  The plan itself is then a simple rule: find the weakest theme with enough
+  evidence, and suggest the matching lesson, puzzles taken from the player's own
+  games in that theme, and a practice game. The engine and SQL choose what to
+  recommend. An LLM could later write a short summary on top, in the same way
+  the Review coach explains engine facts it is given rather than deciding
+  anything itself. I would add the plan only after puzzles are stored in the
+  database, because puzzles are the most useful thing it can recommend. Until
+  then, it could link to the lessons and to Review moments tagged with the weak
+  theme.
+
+  Lessons are the most traditional part of the page, and on their own they are
+  not an edge; any site can publish articles. What makes them fit this product
+  is that they connect to everything else. Each lesson would be short, written
+  by us, and interactive. It would use the same Board component with diagram
+  positions generated from real games, the way the Learn page's sample puzzle
+  already is. It would end with two or three positions where the player makes
+  the move themselves, graded by the same gradeMove used in Practice. The lesson
+  topics already match the engine's motif tags. So when a Review or Practice
+  move is flagged as an X-square mistake, the coach can link straight to
+  "Corners and X-squares". That link is cheap to build and makes the lessons
+  feel like part of the coaching rather than a separate library. Lesson
+  completion would be stored per account alongside puzzle attempts, so the plan
+  knows what the player has already covered.
+
+  I would write the lesson text by hand rather than generate it with an LLM.
+  Wrong Othello strategy presented as a lesson would damage trust in the whole
+  coaching product, and six good lessons are not much work. The positions inside
+  each lesson can still be checked automatically with the engine in tests, the
+  same way the sample puzzle's answer is fixed.
+
+  Some questions I am deliberately leaving open. First, what a skill score
+  should be compared against: early on, absolute accuracy per theme is all we
+  can measure, but "you misplay corners more than players at your level" needs
+  ratings and enough players to make the comparison meaningful. Second, how much
+  history the plan needs before it is honest; my guess is around five analyzed
+  games, but that should be tested. Third, whether guests get a plan at all,
+  since their games are only tied to a seat token in one browser. Fourth, the
+  openings lesson assumes named opening lines, and the engine has no opening
+  book yet, so that lesson depends on the opening book already on the roadmap.
+  Finally, like the analysis engine, the training plan is a candidate for a paid
+  tier, and that ties into the pricing question already open in the Milestone 3
+  notes.

@@ -77,13 +77,15 @@ Finished with successful, account and tournament creation along with vercel, ren
 
 Tomorrow or the next working session, going to spend my remaining time focusing on my competitive edge, testing, and leaving 30 mins to write up documentation. 
 
-### Session 3 — 9/28, 9:30AM
+### Session 3 — 9/28, 9:30AM - 11:40AM
 With roughly four hours remaining in my time budget, I believe at this point I have a solid application that meets the requirements, however, I think it is important for me to spend the majority of my time developing my "competitive edge" of AI integration with coaching, game review, learning/puzzles (probably wont need AI for this section), etc. 
 
 With my remaining time:
 2 hours - developing competetive edge
 1-1.5 hours - testing, going back through code to really understand it is quality and not quantity. 
 30-45 mins - documentation and write up
+
+Finished developing what I could of my competetive edge. Obviously I couldnt get to doing everything I wanted and I will note that down in the final write up roadmap. Going to take a quick lunch break and in the final working session I going to test, review code, and finish writeup documentation. 
 
 ---
 
