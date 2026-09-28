@@ -27,15 +27,31 @@ class EngineClient {
   private readonly worker = new Worker(new URL('../engine/engine.worker.ts', import.meta.url), { type: 'module' });
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
+  /** Set once the worker itself has failed (it couldn't load, or crashed): every request fails from then on. */
+  private broken: Error | null = null;
 
   constructor() {
     this.worker.onmessage = (e: MessageEvent<EngineResponse>) => {
       this.pending.get(e.data.id)?.resolve(e.data);
       this.pending.delete(e.data.id);
     };
+    // Search errors come back as `ok: false` replies; these fire only when the worker itself fails.
+    // Without them, requests in flight would wait forever and the bot would silently never move.
+    this.worker.onerror = (e) => {
+      e.preventDefault();
+      this.fail(new Error(`The practice engine stopped working${e.message ? `: ${e.message}` : ''}. Reload the page to restart it.`));
+    };
+    this.worker.onmessageerror = () => this.fail(new Error('The practice engine sent an unreadable reply. Reload the page to restart it.'));
+  }
+
+  private fail(err: Error) {
+    this.broken = err;
+    for (const p of this.pending.values()) p.reject(err);
+    this.pending.clear();
   }
 
   private send(body: RequestBody): Promise<EngineResponse> {
+    if (this.broken) return Promise.reject(this.broken);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -60,8 +76,7 @@ class EngineClient {
   /** Stops the worker. Requests still waiting are rejected, so nothing awaits them forever. */
   terminate() {
     this.worker.terminate();
-    for (const p of this.pending.values()) p.reject(new Error('Engine stopped'));
-    this.pending.clear();
+    this.fail(new Error('Engine stopped'));
   }
 }
 
@@ -155,7 +170,7 @@ export function usePracticeGame(human: Player, level: BotLevel): PracticeGame {
   useEffect(() => {
     if (pos.turn !== state.human) return;
     let cancelled = false;
-    analyze(pos.key, pos.board, state.human).catch((e) => !cancelled && setError(String(e)));
+    analyze(pos.key, pos.board, state.human).catch((e) => !cancelled && setError(errorMessage(e)));
     return () => {
       cancelled = true;
     };
@@ -175,7 +190,7 @@ export function usePracticeGame(human: Player, level: BotLevel): PracticeGame {
       .then((res) => {
         if (!cancelled) dispatch({ type: 'gradeArrived', key: gradedKey, grade: gradeMove(board, state.human, square, res, humanPly) });
       })
-      .catch((e) => !cancelled && setError(String(e)));
+      .catch((e) => !cancelled && setError(errorMessage(e)));
     return () => {
       cancelled = true;
     };
@@ -204,7 +219,7 @@ export function usePracticeGame(human: Player, level: BotLevel): PracticeGame {
       .then((square) => {
         if (!cancelled) setReply((r) => (r && r.key === key ? { ...r, square } : r));
       })
-      .catch((e) => !cancelled && setError(String(e)));
+      .catch((e) => !cancelled && setError(errorMessage(e)));
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
@@ -247,6 +262,8 @@ export function usePracticeGame(human: Player, level: BotLevel): PracticeGame {
     }, []),
   };
 }
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** True when the last non-pass move in the line is the player's (the bot is replying to it). */
 function lastMoveWasHuman(s: PracticeState): boolean {

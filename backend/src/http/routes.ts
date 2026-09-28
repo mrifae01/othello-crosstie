@@ -31,6 +31,7 @@ import { AppError } from '../errors';
 
 const STATUS_FOR: Record<ErrorCode, number> = {
   BAD_REQUEST: 400,
+  NOT_FOUND: 404,
   GAME_NOT_FOUND: 404,
   GAME_FULL: 409,
   GAME_NOT_ACTIVE: 409,
@@ -316,7 +317,7 @@ export function apiRouter(
     res.json(body);
   }));
 
-  r.use((_req, res) => sendError(res, 'BAD_REQUEST', 'Unknown API endpoint'));
+  r.use((_req, res) => sendError(res, 'NOT_FOUND', 'Unknown API endpoint'));
 
   // Error mapping: AppError → its code; malformed JSON → BAD_REQUEST; anything else → INTERNAL.
   r.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

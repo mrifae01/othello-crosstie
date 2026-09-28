@@ -77,9 +77,16 @@ function snapshotOf(g: GameRecord): GameSnapshotUpdate {
 type StateListener = (state: GameState) => void;
 
 /**
- * Owns live games: an in-memory cache backed by Postgres, and a per-game promise-chain
- * mutex so validate → persist → mutate cache → broadcast runs one operation at a time per game.
- * All rule decisions are delegated to @othello/shared.
+ * A finished game whose analysis has nothing left to do. Nothing can change it any more, so it
+ * isn't kept in memory: reads of old games (reviews, the coach) go to Postgres instead.
+ */
+const isSettled = (g: GameRecord) =>
+  g.status === 'finished' && (g.analysisStatus === 'none' || g.analysisStatus === 'done' || g.analysisStatus === 'failed');
+
+/**
+ * Owns live games: an in-memory cache of games that can still change, backed by Postgres, and a
+ * per-game promise-chain mutex so validate → persist → mutate cache → broadcast runs one
+ * operation at a time per game. All rule decisions are delegated to @othello/shared.
  */
 export class GameService {
   private readonly games = new Map<string, GameRecord>();
@@ -93,9 +100,11 @@ export class GameService {
     return () => this.listeners.delete(listener);
   }
 
+  /** Broadcasts a state change, then drops the game from memory if that change settled it. */
   private emit(g: GameRecord): void {
     const state = toGameState(g);
     for (const l of this.listeners) l(state);
+    if (isSettled(g)) this.games.delete(g.id);
   }
 
   private withLock<T>(gameId: string, fn: () => Promise<T>): Promise<T> {
@@ -110,7 +119,7 @@ export class GameService {
     return run;
   }
 
-  /** Cache hit, or load from Postgres (deduplicating concurrent loads). */
+  /** Cache hit, or load from Postgres (deduplicating concurrent loads). Settled games aren't cached. */
   private async load(gameId: string): Promise<GameRecord | null> {
     const cached = this.games.get(gameId);
     if (cached) return cached;
@@ -121,7 +130,7 @@ export class GameService {
         // A concurrent create/join may have populated the cache first; prefer that.
         const existing = this.games.get(gameId);
         if (existing) return existing;
-        if (g) this.games.set(gameId, g);
+        if (g && !isSettled(g)) this.games.set(gameId, g);
         return g;
       });
       this.loading.set(gameId, pending);

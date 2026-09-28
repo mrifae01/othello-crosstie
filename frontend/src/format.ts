@@ -10,6 +10,7 @@ export function playerLabel(game: GameSummary, p: Player): string {
 
 const ERROR_TEXT: Record<ErrorCode, string> = {
   BAD_REQUEST: 'That request was invalid.',
+  NOT_FOUND: 'The app and the server are out of sync. Refresh the page.',
   GAME_NOT_FOUND: 'Game not found.',
   GAME_FULL: 'This game already has two players.',
   GAME_NOT_ACTIVE: 'The game is not in progress.',

@@ -223,6 +223,7 @@ export interface ExplainMoveResponse {
 
 export type ErrorCode =
   | 'BAD_REQUEST'
+  | 'NOT_FOUND'            // no such API endpoint
   | 'GAME_NOT_FOUND'
   | 'GAME_FULL'
   | 'GAME_NOT_ACTIVE'
