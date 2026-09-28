@@ -8,6 +8,7 @@ import { pool } from './db/pool';
 import { GameService } from './game/GameService';
 import { apiRouter } from './http/routes';
 import { AnalysisRunner } from './analysis/AnalysisRunner';
+import { Claude } from './coach/claude';
 import { CoachService } from './coach/CoachService';
 import { ExplainService } from './coach/ExplainService';
 import { TournamentService } from './tournament/TournamentService';
@@ -51,14 +52,16 @@ async function main(): Promise<void> {
     ready: (p) => io.to(roomFor(p.gameId)).emit('analysis:ready', p),
   });
 
-  const coach = new CoachService(games, analysis);
-  console.log(`[coach] ${coach.enabled ? 'AI coach enabled' : 'AI coach disabled (no ANTHROPIC_API_KEY)'}`);
+  // One Claude client for every coach feature: a failure in either pauses both.
+  const claude = new Claude();
+  console.log(`[coach] ${claude.enabled ? `AI coach enabled (${claude.model})` : 'AI coach disabled (no ANTHROPIC_API_KEY)'}`);
+  const coach = new CoachService(games, analysis, claude);
 
   app.disable('x-powered-by');
   // One proxy hop in production (the host's load balancer), so req.ip is the real client for
   // the coach's per-IP rate limit rather than the proxy's address.
   app.set('trust proxy', 1);
-  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments, coach, new ExplainService(coach)));
+  app.use('/api', allowWebOrigins, apiRouter(games, analysis, tournaments, coach, new ExplainService(claude)));
 
   httpServer.listen(PORT, () => console.log(`[api] listening on http://localhost:${PORT}`));
 

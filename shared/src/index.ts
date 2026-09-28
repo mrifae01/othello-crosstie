@@ -1,5 +1,6 @@
 export * from './types';
 export * from './notation';
+export * from './line';
 export * from './engine/rules';
 export * from './engine/eval';
 export * from './engine/search';

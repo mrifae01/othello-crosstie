@@ -1,6 +1,7 @@
 import type { Server, Socket } from 'socket.io';
 import type { Ack, ClientToServerEvents, ErrorCode, ServerToClientEvents, SubscribeResult } from '@othello/shared';
-import { GameError, type GameService } from '../game/GameService';
+import type { GameService } from '../game/GameService';
+import { AppError } from '../errors';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type ClientSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -8,7 +9,7 @@ type ClientSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 export const roomFor = (gameId: string) => `game:${gameId}`;
 
 function errAck(err: unknown): { ok: false; error: ErrorCode; message: string } {
-  if (err instanceof GameError) return { ok: false, error: err.code, message: err.message };
+  if (err instanceof AppError) return { ok: false, error: err.code, message: err.message };
   console.error('[socket] unhandled error:', err);
   return { ok: false, error: 'INTERNAL', message: 'Internal server error' };
 }

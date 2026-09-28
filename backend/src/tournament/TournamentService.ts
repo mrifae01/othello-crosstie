@@ -18,7 +18,8 @@ import { pool, withTx } from '../db/pool';
 import { insertTournamentGame, isValidGameId } from '../db/gamesRepo';
 import * as repo from '../db/tournamentsRepo';
 import type { LockedTournament } from '../db/tournamentsRepo';
-import { GameError, type GameService } from '../game/GameService';
+import type { GameService } from '../game/GameService';
+import { AppError } from '../errors';
 
 function shuffle<T>(items: T[]): T[] {
   const a = items.slice();
@@ -56,26 +57,26 @@ export class TournamentService {
 
   async get(id: string): Promise<TournamentDetail> {
     const t = isValidGameId(id) ? await repo.loadTournament(id) : null;
-    if (!t) throw new GameError('TOURNAMENT_NOT_FOUND', 'Tournament not found');
+    if (!t) throw new AppError('TOURNAMENT_NOT_FOUND', 'Tournament not found');
     return t;
   }
 
   /** Runs `fn` with the tournament row-locked; 404s on an unknown id. */
   private async locked<T>(id: string, fn: (c: pg.PoolClient, t: LockedTournament) => Promise<T>): Promise<T> {
-    if (!isValidGameId(id)) throw new GameError('TOURNAMENT_NOT_FOUND', 'Tournament not found');
+    if (!isValidGameId(id)) throw new AppError('TOURNAMENT_NOT_FOUND', 'Tournament not found');
     return withTx(async (c) => {
       const t = await repo.lockTournament(c, id);
-      if (!t) throw new GameError('TOURNAMENT_NOT_FOUND', 'Tournament not found');
+      if (!t) throw new AppError('TOURNAMENT_NOT_FOUND', 'Tournament not found');
       return fn(c, t);
     });
   }
 
   async join(id: string, account: Account): Promise<TournamentDetail> {
     await this.locked(id, async (c, t) => {
-      if (t.status !== 'registering') throw new GameError('TOURNAMENT_NOT_OPEN', 'Registration is closed');
+      if (t.status !== 'registering') throw new AppError('TOURNAMENT_NOT_OPEN', 'Registration is closed');
       const entrants = await repo.listEntrants(c, id);
       if (entrants.some((e) => e.accountId === account.id)) return;
-      if (entrants.length >= t.max_players) throw new GameError('TOURNAMENT_FULL', 'This tournament is full');
+      if (entrants.length >= t.max_players) throw new AppError('TOURNAMENT_FULL', 'This tournament is full');
       await repo.insertEntry(c, id, account.id);
     });
     return this.get(id);
@@ -83,7 +84,7 @@ export class TournamentService {
 
   async leave(id: string, account: Account): Promise<TournamentDetail> {
     await this.locked(id, async (c, t) => {
-      if (t.status !== 'registering') throw new GameError('TOURNAMENT_NOT_OPEN', 'The tournament has already started');
+      if (t.status !== 'registering') throw new AppError('TOURNAMENT_NOT_OPEN', 'The tournament has already started');
       await repo.deleteEntry(c, id, account.id);
     });
     return this.get(id);
@@ -92,11 +93,11 @@ export class TournamentService {
   /** Organizer only: random seeding, all matches created, byes resolved, round-1 games created. */
   async start(id: string, account: Account): Promise<TournamentDetail> {
     await this.locked(id, async (c, t) => {
-      if (t.organizer_id !== account.id) throw new GameError('FORBIDDEN', 'Only the organizer can start the tournament');
-      if (t.status !== 'registering') throw new GameError('TOURNAMENT_NOT_OPEN', 'The tournament has already started');
+      if (t.organizer_id !== account.id) throw new AppError('FORBIDDEN', 'Only the organizer can start the tournament');
+      if (t.status !== 'registering') throw new AppError('TOURNAMENT_NOT_OPEN', 'The tournament has already started');
       const entrants = shuffle(await repo.listEntrants(c, id));
       if (entrants.length < MIN_TOURNAMENT_PLAYERS) {
-        throw new GameError('BAD_REQUEST', `At least ${MIN_TOURNAMENT_PLAYERS} players must join before starting`);
+        throw new AppError('BAD_REQUEST', `At least ${MIN_TOURNAMENT_PLAYERS} players must join before starting`);
       }
 
       const size = bracketSize(entrants.length);
@@ -126,11 +127,11 @@ export class TournamentService {
   /** Organizer only: ends a playing match's game against a player who didn't show. */
   async forfeit(id: string, account: Account, round: number, slot: number, loser: Player): Promise<TournamentDetail> {
     const gameId = await this.locked(id, async (c, t) => {
-      if (t.organizer_id !== account.id) throw new GameError('FORBIDDEN', 'Only the organizer can forfeit a match');
-      if (t.status !== 'active') throw new GameError('TOURNAMENT_NOT_OPEN', 'The tournament is not in progress');
+      if (t.organizer_id !== account.id) throw new AppError('FORBIDDEN', 'Only the organizer can forfeit a match');
+      if (t.status !== 'active') throw new AppError('TOURNAMENT_NOT_OPEN', 'The tournament is not in progress');
       const m = await repo.getMatch(c, id, round, slot);
-      if (!m) throw new GameError('BAD_REQUEST', 'No such match');
-      if (!m.game_id || m.winner_id) throw new GameError('TOURNAMENT_NOT_OPEN', 'That match is not being played');
+      if (!m) throw new AppError('BAD_REQUEST', 'No such match');
+      if (!m.game_id || m.winner_id) throw new AppError('TOURNAMENT_NOT_OPEN', 'That match is not being played');
       return m.game_id;
     });
     const state = await this.games.forfeit(gameId, loser);
@@ -145,9 +146,9 @@ export class TournamentService {
    */
   async cancel(id: string, account: Account): Promise<TournamentDetail> {
     const playing = await this.locked(id, async (c, t) => {
-      if (t.organizer_id !== account.id) throw new GameError('FORBIDDEN', 'Only the organizer can end the tournament');
+      if (t.organizer_id !== account.id) throw new AppError('FORBIDDEN', 'Only the organizer can end the tournament');
       if (t.status !== 'registering' && t.status !== 'active') {
-        throw new GameError('TOURNAMENT_NOT_OPEN', 'The tournament is already over');
+        throw new AppError('TOURNAMENT_NOT_OPEN', 'The tournament is already over');
       }
       await repo.markCancelled(c, id);
       return repo.playingGameIds(c, id);

@@ -582,20 +582,6 @@ a.lesson:hover { background: var(--surface-2); }
 .toast-info { background: var(--ink); color: var(--bg); }
 @keyframes toast-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
-/* ---------- Mock dev bar (developer tool; intentionally off-theme) ---------- */
-.devbar {
-  position: fixed; right: 12px; bottom: 12px; z-index: 40; max-width: calc(100vw - 24px);
-  background: #15171b; color: #e6e6e6; border-radius: 8px; padding: 8px 10px; font-size: 0.8rem;
-  display: flex; flex-direction: column; gap: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-.devbar-toggle { all: unset; cursor: pointer; font-weight: 700; letter-spacing: 0.05em; color: #ffcc66; }
-.devbar-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.devbar a { color: #9fd3ff; }
-.devbar button:not(.devbar-toggle) { font: inherit; background: #2b2f36; color: #fff; border: 1px solid #555c68; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
-.devbar button.active { background: #ffcc66; color: #222; border-color: #ffcc66; }
-.devbar button:disabled { opacity: 0.4; cursor: not-allowed; }
-.devbar-exit { font-size: 0.75rem; }
-
 /* ---------- Responsive ---------- */
 @media (max-width: 1280px) {
   /* Icon-only nav rail. */

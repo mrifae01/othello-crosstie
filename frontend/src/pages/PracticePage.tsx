@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Player, PlyAnalysis } from '@othello/shared';
 import {
@@ -8,6 +8,7 @@ import {
   isBotLevel,
   isReplyPending,
   lastHumanPly,
+  lastPlacedSquare,
   opponent,
   REPLY_DELAY_MS,
   squareToAlg,
@@ -19,11 +20,13 @@ import { useExplainMove } from '../data/useExplainMove';
 import { hintText } from '../data/practiceHint';
 import { Board } from '../components/Board';
 import { EvalBar } from '../components/EvalBar';
-import { CoachBubble, CoachSeal } from '../components/CoachBubble';
+import { AccuracySummary } from '../components/AccuracySummary';
+import { CoachBubble, CoachCard } from '../components/CoachBubble';
 import { PlayerBar } from '../components/PlayerBar';
 import { MoveList, type MoveListItem } from '../components/MoveList';
 import { BotIcon, BulbIcon, RedoIcon, TargetIcon, UndoIcon } from '../components/icons';
-import { CLASS_LABEL, CLASS_ORDER, colorName } from '../format';
+import { colorName } from '../format';
+import { useKeyboardShortcuts } from '../useKeyboardShortcuts';
 
 type ColorChoice = Player | 'random';
 const LEVELS: BotLevel[] = ['easy', 'medium', 'hard'];
@@ -55,20 +58,11 @@ function PracticeSession({ level, color }: { level: BotLevel; color: ColorChoice
   const coach = useExplainMove(game);
   const explained = coach.current;
 
-  const { takeBack, forward, resume } = game;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
-      if (e.key === 'ArrowLeft') takeBack();
-      else if (e.key === 'ArrowRight') forward();
-      else if (e.key === ' ' && state.paused) resume();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [takeBack, forward, resume, state.paused]);
+  useKeyboardShortcuts({
+    ArrowLeft: game.takeBack,
+    ArrowRight: game.forward,
+    ' ': state.paused ? game.resume : undefined,
+  });
 
   // What Hint / Show best talk about: the player's options on their turn, or, while the bot's
   // reply is pending, the decision they just made.
@@ -82,7 +76,7 @@ function PracticeSession({ level, color }: { level: BotLevel; color: ColorChoice
         : null;
   const canReveal = !gameOver && (pos.turn === human || pending);
 
-  const lastMove = [...state.moves].reverse().find((m) => m.square !== null)?.square ?? null;
+  const lastMove = lastPlacedSquare(state.moves);
   const counts = countDiscs(pos.board);
   const botInfo = { name: `${BOT_LEVELS[state.level].label} bot`, accountId: 'bot' }; // non-null: no "guest" tag
   const youInfo = { name: 'You', accountId: 'you' };
@@ -142,13 +136,15 @@ function PracticeSession({ level, color }: { level: BotLevel; color: ColorChoice
               explaining={explained?.status === 'loading'}
             />
           ) : (
-            <StatusBubble headline={game.grading ? 'Coach is thinking…' : 'Coached practice'}>
-              {game.grading
-                ? 'Grading your move.'
-                : human === 'B'
-                  ? 'You move first. Every move you make is graded straight away; take back anything you like.'
-                  : 'The bot opens. Every move you make is graded straight away; take back anything you like.'}
-            </StatusBubble>
+            <CoachCard headline={game.grading ? 'Coach is thinking…' : 'Coached practice'}>
+              <p>
+                {game.grading
+                  ? 'Grading your move.'
+                  : human === 'B'
+                    ? 'You move first. Every move you make is graded straight away; take back anything you like.'
+                    : 'The bot opens. Every move you make is graded straight away; take back anything you like.'}
+              </p>
+            </CoachCard>
           )}
 
           {state.revealed !== 'none' && (
@@ -282,19 +278,7 @@ function GameOverCard({
         </span>
       </div>
       <div className="summary-card">
-        <div className="accuracy">
-          <span className="accuracy-num">{s.accuracy.toFixed(1)}</span>
-          <span className="muted small">accuracy · avg loss {s.avgLoss.toFixed(1)}</span>
-        </div>
-        <ul className="class-counts">
-          {CLASS_ORDER.map((c) => (
-            <li key={c} className={s.counts[c] === 0 ? 'zero' : ''}>
-              <span className={`class-dot cls-${c}`} />
-              <span>{CLASS_LABEL[c]}</span>
-              <span className="num">{s.counts[c]}</span>
-            </li>
-          ))}
-        </ul>
+        <AccuracySummary s={s} />
         <p className="muted tiny">
           Take backs {state.stats.takebacks} · hints {state.stats.hintsUsed} · best moves shown {state.stats.bestShown}.
           Accuracy counts the moves you kept.
@@ -309,20 +293,6 @@ function GameOverCard({
             Try {BOT_LEVELS[l].label}
           </Link>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function StatusBubble({ headline, children }: { headline: string; children: ReactNode }) {
-  return (
-    <div className="coach">
-      <CoachSeal />
-      <div className="coach-bubble">
-        <div className="coach-head">
-          <strong>{headline}</strong>
-        </div>
-        <p>{children}</p>
       </div>
     </div>
   );

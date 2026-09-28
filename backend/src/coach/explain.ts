@@ -1,9 +1,7 @@
-import type Anthropic from '@anthropic-ai/sdk';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { strayMoveSquares, type CoachMoment, type MoveFacts } from '@othello/shared';
-import { GameError } from '../game/GameService';
-import { CoachCallError, failureKind } from './CoachService';
+import { AppError } from '../errors';
+import type { Claude, ClaudeUsage } from './claude';
 
 /**
  * Practice "Explain why": one move, explained on demand. Same approach as the debrief
@@ -52,45 +50,28 @@ export const ExplainOutput = z.object({
 export interface WrittenExplanation {
   explanation: CoachMoment;
   model: string;
-  usage: { inputTokens: number; outputTokens: number };
+  usage: ClaudeUsage;
 }
 
-/**
- * One Claude call: a move's fact sheet in, a grounded explanation out. Throws CoachCallError if
- * the call fails, and a plain COACH_UNAVAILABLE GameError if the answer isn't usable, including
- * when it names a square the facts don't (a sign the model invented a line).
- */
-export async function writeExplanation(client: Anthropic, model: string, facts: MoveFacts, label: string): Promise<WrittenExplanation> {
-  let response;
-  try {
-    // Thinking off, as for the debrief: the reasoning is already in the facts.
-    response = await client.messages.parse({
-      model,
-      max_tokens: 1024,
-      thinking: { type: 'disabled' },
-      output_config: { format: zodOutputFormat(ExplainOutput) },
-      system: EXPLAIN_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildExplainUserPrompt(facts) }],
-    });
-  } catch (err) {
-    const kind = failureKind(err);
-    console.error(`[coach] explain ${label}: Claude request failed (${kind}):`, (err as Error).message);
-    throw new CoachCallError(kind, 'The AI coach is unavailable right now');
-  }
+const UNUSABLE = "The coach couldn't explain this move. Try again.";
 
-  const output = response.parsed_output;
-  if (response.stop_reason !== 'end_turn' || !output) {
-    console.error(`[coach] explain ${label}: no usable explanation (stop_reason ${response.stop_reason})`);
-    throw new GameError('COACH_UNAVAILABLE', "The coach couldn't explain this move. Try again.");
-  }
+/**
+ * One Claude call: a move's fact sheet in, a grounded explanation out. Throws COACH_UNAVAILABLE
+ * if the answer names a square the facts don't (a sign the model invented a line).
+ */
+export async function writeExplanation(claude: Claude, facts: MoveFacts, label: string): Promise<WrittenExplanation> {
+  const { output, model, usage } = await claude.parse({
+    system: EXPLAIN_SYSTEM_PROMPT,
+    user: buildExplainUserPrompt(facts),
+    schema: ExplainOutput,
+    maxTokens: 1024,
+    label: `explain ${label}`,
+    unusableMessage: UNUSABLE,
+  });
   const stray = strayMoveSquares(output, facts);
   if (stray.length > 0) {
     console.warn(`[coach] explain ${label}: dropped, names ${stray.join(', ')}, which the facts don't`);
-    throw new GameError('COACH_UNAVAILABLE', "The coach couldn't explain this move. Try again.");
+    throw new AppError('COACH_UNAVAILABLE', UNUSABLE);
   }
-  return {
-    explanation: { ply: facts.ply, ...output },
-    model: response.model,
-    usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
-  };
+  return { explanation: { ply: facts.ply, ...output }, model, usage };
 }

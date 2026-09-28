@@ -1,4 +1,5 @@
-import { Link, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
+import { NotFound } from './components/NotFound';
 import { SideNav } from './components/SideNav';
 import { HomePage } from './pages/HomePage';
 import { PlayPage } from './pages/PlayPage';
@@ -25,17 +26,7 @@ export function App() {
           <Route path="/practice" element={<PracticePage />} />
           <Route path="/tournaments" element={<TournamentsPage />} />
           <Route path="/tournaments/:id" element={<TournamentPage />} />
-          <Route
-            path="*"
-            element={
-              <div className="panel center">
-                <h2>Page not found</h2>
-                <Link to="/" className="btn">
-                  Back to home
-                </Link>
-              </div>
-            }
-          />
+          <Route path="*" element={<NotFound title="Page not found" />} />
         </Routes>
       </main>
     </div>

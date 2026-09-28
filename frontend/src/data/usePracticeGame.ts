@@ -11,7 +11,7 @@ import {
   replay,
   REPLY_DELAY_MS,
   type BotLevel,
-  type PracticePosition,
+  type LinePosition,
   type PracticeState,
   type SearchResult,
 } from '@othello/shared';
@@ -78,7 +78,7 @@ interface Reply {
 
 export interface PracticeGame {
   state: PracticeState;
-  pos: PracticePosition;
+  pos: LinePosition;
   /** The coach's search of the current position, once ready (the player's turn only). */
   scored: SearchResult | null;
   /** Grade of the player's latest move, shown until their next move. */

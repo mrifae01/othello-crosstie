@@ -10,7 +10,7 @@ import { useGameClient } from '../data/ClientContext';
 import { errorText } from '../format';
 
 export type AuthState =
-  /** No Supabase configured (or mock mode): guest-only. */
+  /** No Supabase configured: guest-only. */
   | { status: 'disabled' }
   | { status: 'loading' }
   | { status: 'guest' }

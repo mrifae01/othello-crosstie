@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { GameState, Player, Square } from '@othello/shared';
+import { lastPlacedSquare } from '@othello/shared';
 import { useGameClient, useSeatToken } from '../data/ClientContext';
 import { setSeatToken } from '../data/seatStorage';
 import { useLiveGame } from '../data/useLiveGame';
 import { Board } from '../components/Board';
 import { MoveList } from '../components/MoveList';
+import { NotFound } from '../components/NotFound';
 import { SeatForm } from '../components/SeatForm';
 import { PlayerBar } from '../components/PlayerBar';
 import { FlagIcon, PlayIcon, ReviewIcon, SparkleIcon } from '../components/icons';
@@ -52,24 +54,14 @@ function GameView({ gameId }: { gameId: string }) {
       : null,
   );
 
-  if (notFound) {
-    return (
-      <div className="panel center">
-        <h2>Game not found</h2>
-        <p className="muted">Check the invite link, or start a new game.</p>
-        <Link to="/" className="btn">
-          Back to home
-        </Link>
-      </div>
-    );
-  }
+  if (notFound) return <NotFound title="Game not found">Check the invite link, or start a new game.</NotFound>;
   if (!state) {
     return <div className="panel center muted">{error ?? 'Loading game…'}</div>;
   }
 
   const myTurn = state.status === 'active' && you !== null && state.turn === you;
   const lastMove = state.moves.length ? state.moves[state.moves.length - 1] : null;
-  const lastPlaced = [...state.moves].reverse().find((m) => m.square !== null)?.square ?? null;
+  const lastPlaced = lastPlacedSquare(state.moves);
 
   async function play(square: Square) {
     if (!token || moving) return;

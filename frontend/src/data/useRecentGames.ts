@@ -7,7 +7,7 @@ import { errorText } from '../format';
 export interface RecentGames {
   /**
    * Whose games: 'mine' when signed in; 'all' when accounts aren't configured at all
-   * (zero-config run, mock mode) so lists aren't empty; null in any other auth state,
+   * (a zero-config run) so lists aren't empty; null in any other auth state,
    * where callers show a prompt instead of a list.
    */
   source: 'mine' | 'all' | null;

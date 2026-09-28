@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { MIN_TOURNAMENT_PLAYERS, type Player, type TournamentDetail, type TournamentMatch } from '@othello/shared';
 import { useAuth } from '../auth/AuthContext';
 import { useGameClient } from '../data/ClientContext';
@@ -7,6 +7,7 @@ import { getSeatToken, setSeatToken } from '../data/seatStorage';
 import { useToasts } from '../components/Toasts';
 import { SignInDialog } from '../components/AccountMenu';
 import { Bracket } from '../components/Bracket';
+import { NotFound } from '../components/NotFound';
 import { errorText, fmtDate } from '../format';
 
 const STATUS_LABEL: Record<TournamentDetail['status'], (t: TournamentDetail) => string> = {
@@ -99,16 +100,7 @@ export function TournamentPage() {
     if (window.confirm(question)) void act(() => client.cancelTournament(id));
   }
 
-  if (loadError && !t) {
-    return (
-      <div className="panel center">
-        <h2>{loadError}</h2>
-        <Link to="/tournaments" className="btn">
-          All tournaments
-        </Link>
-      </div>
-    );
-  }
+  if (loadError && !t) return <NotFound title={loadError} to="/tournaments" linkLabel="All tournaments" />;
   if (!t) return <p className="muted center page">Loading…</p>;
 
   const me = auth.account;

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { CoachMoment, Motif, PlyAnalysis } from '@othello/shared';
 import { squareToAlg } from '@othello/shared';
 import { colorName } from '../format';
@@ -36,27 +37,37 @@ export function CoachBubble({ ply, summary, moment, aiEnabled = false, variant =
     : ply
       ? coachLine(ply)
       : { headline: 'Game over', body: summary };
+  const badge = moment ? (
+    <span className="live-badge">AI coach</span>
+  ) : !aiEnabled && variant === 'review' ? (
+    <ComingSoon label="AI coach preview" />
+  ) : null;
+  return (
+    <CoachCard headline={headline} badge={badge}>
+      <p>{body}</p>
+      {moment && <p className="coach-lesson">{moment.lesson}</p>}
+      {variant === 'practice' && ply && ply.square !== null && !moment && onExplain && (
+        <div className="coach-explain">
+          <button type="button" className="btn btn-small" onClick={onExplain} disabled={explaining}>
+            {explaining ? 'Coach is writing…' : 'Explain why'}
+          </button>
+        </div>
+      )}
+    </CoachCard>
+  );
+}
+
+/** The coach speaking: the seal, then a speech bubble with a headline (and optional badge) over `children`. */
+export function CoachCard({ headline, badge, children }: { headline: ReactNode; badge?: ReactNode; children: ReactNode }) {
   return (
     <div className="coach">
       <CoachSeal />
       <div className="coach-bubble">
         <div className="coach-head">
           <strong>{headline}</strong>
-          {moment ? (
-            <span className="live-badge">AI coach</span>
-          ) : (
-            !aiEnabled && variant === 'review' && <ComingSoon label="AI coach preview" />
-          )}
+          {badge}
         </div>
-        <p>{body}</p>
-        {moment && <p className="coach-lesson">{moment.lesson}</p>}
-        {variant === 'practice' && ply && ply.square !== null && !moment && onExplain && (
-          <div className="coach-explain">
-            <button type="button" className="btn btn-small" onClick={onExplain} disabled={explaining}>
-              {explaining ? 'Coach is writing…' : 'Explain why'}
-            </button>
-          </div>
-        )}
+        {children}
       </div>
     </div>
   );

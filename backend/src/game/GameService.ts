@@ -1,33 +1,22 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
-  applyMove,
   countDiscs,
   getFlips,
   getLegalMoves,
   initialBoard,
-  nextTurn,
   opponent,
+  playMove,
   winnerOf,
   type AnalysisStatus,
-  type ErrorCode,
   type GameStatus,
   type PlayedMove,
   type GameState,
   type GameSummary,
   type Player,
 } from '@othello/shared';
+import { AppError } from '../errors';
 import * as repo from '../db/gamesRepo';
 import type { GameRecord, GameSnapshotUpdate, MoveInsert, SeatHolder } from '../db/gamesRepo';
-
-/** A domain error that maps directly onto an `ErrorCode` for REST and socket acks. */
-export class GameError extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -143,7 +132,7 @@ export class GameService {
 
   private async mustLoad(gameId: string): Promise<GameRecord> {
     const g = await this.load(gameId);
-    if (!g) throw new GameError('GAME_NOT_FOUND', 'Game not found');
+    if (!g) throw new AppError('GAME_NOT_FOUND', 'Game not found');
     return g;
   }
 
@@ -176,11 +165,11 @@ export class GameService {
     return this.withLock(gameId, async () => {
       const g = await this.mustLoad(gameId);
       if (g.status !== 'waiting' || g.whiteTokenHash !== null) {
-        throw new GameError('GAME_FULL', 'This game already has two players');
+        throw new AppError('GAME_FULL', 'This game already has two players');
       }
       const playerToken = newToken();
       const updated = await repo.joinGame(gameId, white, hashToken(playerToken));
-      if (!updated) throw new GameError('GAME_FULL', 'This game already has two players');
+      if (!updated) throw new AppError('GAME_FULL', 'This game already has two players');
       Object.assign(g, {
         status: updated.status,
         whiteName: updated.whiteName,
@@ -200,20 +189,22 @@ export class GameService {
   async move(gameId: string, token: unknown, square: number, afterPersist?: () => void): Promise<GameState> {
     return this.withLock(gameId, async () => {
       const g = await this.mustLoad(gameId);
-      if (g.status !== 'active' || !g.turn) throw new GameError('GAME_NOT_ACTIVE', 'Game is not active');
+      if (g.status !== 'active' || !g.turn) throw new AppError('GAME_NOT_ACTIVE', 'Game is not active');
       const seat = this.seatFor(g, token);
-      if (!seat) throw new GameError('BAD_TOKEN', 'Token does not match a seat in this game');
-      if (seat !== g.turn) throw new GameError('NOT_YOUR_TURN', 'It is not your turn');
+      if (!seat) throw new AppError('BAD_TOKEN', 'Token does not match a seat in this game');
+      if (seat !== g.turn) throw new AppError('NOT_YOUR_TURN', 'It is not your turn');
       if (getFlips(g.board, seat, square).length === 0) {
-        throw new GameError('ILLEGAL_MOVE', 'That square is not a legal move');
+        throw new AppError('ILLEGAL_MOVE', 'That square is not a legal move');
       }
 
-      const { board, flipped } = applyMove(g.board, seat, square);
-      const inserts: MoveInsert[] = [{ ply: g.moves.length + 1, player: seat, square, flipped, boardAfter: board }];
-      const next = nextTurn(board, seat);
-      if (next === seat) {
-        inserts.push({ ply: g.moves.length + 2, player: opponent(seat), square: null, flipped: [], boardAfter: board });
-      }
+      const { board, flipped, moves, turn: next } = playMove(g.board, seat, square);
+      const inserts: MoveInsert[] = moves.map((m, i) => ({
+        ply: g.moves.length + 1 + i,
+        player: m.player,
+        square: m.square,
+        flipped: m.square === null ? [] : flipped, // an automatic pass flips nothing
+        boardAfter: board,
+      }));
       const over = next === null;
       const snapshot: GameSnapshotUpdate = {
         status: over ? 'finished' : 'active',
@@ -230,7 +221,7 @@ export class GameService {
         await repo.recordMoves(gameId, inserts, snapshot);
       } catch (err) {
         console.error(`[game ${gameId}] persist failed:`, (err as Error).message);
-        throw new GameError('INTERNAL', 'Failed to save the move');
+        throw new AppError('INTERNAL', 'Failed to save the move');
       }
 
       // Persisted: now (and only now) mutate the cache.
@@ -245,9 +236,9 @@ export class GameService {
   async resign(gameId: string, token: unknown, afterPersist?: () => void): Promise<GameState> {
     return this.withLock(gameId, async () => {
       const g = await this.mustLoad(gameId);
-      if (g.status !== 'active') throw new GameError('GAME_NOT_ACTIVE', 'Game is not active');
+      if (g.status !== 'active') throw new AppError('GAME_NOT_ACTIVE', 'Game is not active');
       const seat = this.seatFor(g, token);
-      if (!seat) throw new GameError('BAD_TOKEN', 'Token does not match a seat in this game');
+      if (!seat) throw new AppError('BAD_TOKEN', 'Token does not match a seat in this game');
 
       const snapshot: GameSnapshotUpdate = {
         ...snapshotOf(g),
@@ -262,7 +253,7 @@ export class GameService {
         await repo.updateGame(gameId, snapshot);
       } catch (err) {
         console.error(`[game ${gameId}] resign persist failed:`, (err as Error).message);
-        throw new GameError('INTERNAL', 'Failed to save the resignation');
+        throw new AppError('INTERNAL', 'Failed to save the resignation');
       }
       Object.assign(g, snapshot);
       afterPersist?.();
@@ -280,8 +271,8 @@ export class GameService {
       const g = await this.mustLoad(gameId);
       const color: Player | null =
         g.blackAccountId === accountId ? 'B' : g.whiteAccountId === accountId ? 'W' : null;
-      if (!color) throw new GameError('BAD_TOKEN', 'Your account does not hold a seat in this game');
-      if (g.status !== 'active') throw new GameError('GAME_NOT_ACTIVE', 'Game is not active');
+      if (!color) throw new AppError('BAD_TOKEN', 'Your account does not hold a seat in this game');
+      if (g.status !== 'active') throw new AppError('GAME_NOT_ACTIVE', 'Game is not active');
       const playerToken = newToken();
       const hash = hashToken(playerToken);
       await repo.setSeatTokenHash(gameId, color, hash);
@@ -295,7 +286,7 @@ export class GameService {
   async forfeit(gameId: string, loser: Player): Promise<GameState> {
     return this.withLock(gameId, async () => {
       const g = await this.mustLoad(gameId);
-      if (g.status !== 'active') throw new GameError('GAME_NOT_ACTIVE', 'Game is not active');
+      if (g.status !== 'active') throw new AppError('GAME_NOT_ACTIVE', 'Game is not active');
       const snapshot: GameSnapshotUpdate = {
         ...snapshotOf(g),
         status: 'finished',

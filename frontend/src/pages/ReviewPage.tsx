@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { AnalysisResult, Player, PlayerAnalysisSummary, PlyAnalysis } from '@othello/shared';
-import { countDiscs, squareToAlg } from '@othello/shared';
+import { countDiscs, lastPlacedSquare, squareToAlg } from '@othello/shared';
 import { useAuth } from '../auth/AuthContext';
 import { useGameClient } from '../data/ClientContext';
 import { useCoachDebrief } from '../data/useCoachDebrief';
 import { isGameClientError } from '../data/GameClient';
+import { AccuracySummary } from '../components/AccuracySummary';
 import { AnalysisBar } from '../components/AnalysisBar';
 import { Board } from '../components/Board';
 import { EvalGraph } from '../components/EvalGraph';
@@ -14,8 +15,10 @@ import { PlayerBar } from '../components/PlayerBar';
 import { EvalBar } from '../components/EvalBar';
 import { CoachBubble } from '../components/CoachBubble';
 import { CoachDebriefCard } from '../components/CoachDebriefCard';
+import { NotFound } from '../components/NotFound';
 import { ChevronLeftIcon, ChevronRightIcon, FirstIcon, LastIcon, ReviewIcon } from '../components/icons';
-import { CLASS_LABEL, CLASS_ORDER, MOTIF_LABEL, colorName, errorText, fmtEval, resultText } from '../format';
+import { CLASS_LABEL, MOTIF_LABEL, colorName, errorText, fmtEval, resultText } from '../format';
+import { useKeyboardShortcuts } from '../useKeyboardShortcuts';
 
 export function ReviewPage() {
   const { id = '' } = useParams();
@@ -73,16 +76,7 @@ function ReviewLoader({ gameId }: { gameId: string }) {
     };
   }, [client, gameId, load]);
 
-  if (notFound) {
-    return (
-      <div className="panel center">
-        <h2>Game not found</h2>
-        <Link to="/" className="btn">
-          Back to home
-        </Link>
-      </div>
-    );
-  }
+  if (notFound) return <NotFound title="Game not found" />;
   if (!result) return <div className="panel center muted">{error ?? 'Loading analysis…'}</div>;
 
   if (result.status !== 'done' || !result.summary) {
@@ -135,24 +129,16 @@ function ReviewBody({ result, summary }: ReviewBodyProps) {
   const [cursor, setCursor] = useState(0);
   const go = useCallback((c: number) => setCursor(Math.max(0, Math.min(n, c))), [n]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
-      if (e.key === 'ArrowLeft') setCursor((c) => Math.max(0, c - 1));
-      else if (e.key === 'ArrowRight') setCursor((c) => Math.min(n, c + 1));
-      else if (e.key === 'Home') setCursor(0);
-      else if (e.key === 'End') setCursor(n);
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [n]);
+  useKeyboardShortcuts({
+    ArrowLeft: () => go(cursor - 1),
+    ArrowRight: () => go(cursor + 1),
+    Home: () => go(0),
+    End: () => go(n),
+  });
 
   const ply: PlyAnalysis | null = cursor < n ? plies[cursor] : null;
   const board = ply ? ply.boardBefore : plies[n - 1].boardAfter;
-  const prevPlaced = [...plies.slice(0, cursor)].reverse().find((p) => p.square !== null)?.square ?? null;
+  const prevPlaced = lastPlacedSquare(plies.slice(0, cursor));
 
   const counts = countDiscs(board);
   const evalNow = ply ? ply.evalBefore : plies[n - 1].evalAfter;
@@ -341,19 +327,7 @@ function SummaryCard({ result, player, s }: { result: AnalysisResult; player: Pl
         <span className={`disc disc-${player} mini`} />
         <span className="player-name">{name}</span>
       </div>
-      <div className="accuracy">
-        <span className="accuracy-num">{s.accuracy.toFixed(1)}</span>
-        <span className="muted small">accuracy · avg loss {s.avgLoss.toFixed(1)}</span>
-      </div>
-      <ul className="class-counts">
-        {CLASS_ORDER.map((c) => (
-          <li key={c} className={s.counts[c] === 0 ? 'zero' : ''}>
-            <span className={`class-dot cls-${c}`} />
-            <span>{CLASS_LABEL[c]}</span>
-            <span className="num">{s.counts[c]}</span>
-          </li>
-        ))}
-      </ul>
+      <AccuracySummary s={s} />
     </div>
   );
 }

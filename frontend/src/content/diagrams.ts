@@ -51,6 +51,3 @@ export const HERO = position('c4c3e6b4a4a5c2f4g4a3d2e2c1b2e1a1a2c5b5a6b3d1a7a8b6
 export const CORNER_PUZZLE = position(prefix(38));
 export const CORNER_PUZZLE_ANSWER = algToSquare('h8');
 export const CORNER_PUZZLE_LEGAL = getLegalMoves(CORNER_PUZZLE.board, 'B');
-
-export const CORNERS: Square[] = ['a1', 'h1', 'a8', 'h8'].map(algToSquare);
-export const X_SQUARES: Square[] = ['b2', 'g2', 'b7', 'g7'].map(algToSquare);

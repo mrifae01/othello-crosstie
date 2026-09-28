@@ -2,7 +2,7 @@ import { useEffect, type ComponentType, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { countDiscs } from '@othello/shared';
 import { Board } from '../components/Board';
-import { CoachSeal } from '../components/CoachBubble';
+import { CoachCard } from '../components/CoachBubble';
 import { ComingSoon } from '../components/ComingSoon';
 import { RecentGames } from '../components/RecentGames';
 import { BotIcon, CheckIcon, LearnIcon, PlayIcon, PuzzleIcon, ReviewIcon, SparkleIcon, TrophyIcon } from '../components/icons';
@@ -224,20 +224,18 @@ function ReviewPreview() {
         />
         <circle cx="200" cy="20" r="5" className="rp-graph-dot" />
       </svg>
-      <div className="coach">
-        <CoachSeal />
-        <div className="coach-bubble">
-          <div className="coach-head">
-            <strong>
-              38. g7 is a blunder <span className="class-badge small cls-blunder">??</span>
-            </strong>
-          </div>
-          <p>
-            White played next to an empty corner, and Black takes h8 next. You've done this in 3 of your last 5 games.
-            Want a puzzle on it?
-          </p>
-        </div>
-      </div>
+      <CoachCard
+        headline={
+          <>
+            38. g7 is a blunder <span className="class-badge small cls-blunder">??</span>
+          </>
+        }
+      >
+        <p>
+          White played next to an empty corner, and Black takes h8 next. You've done this in 3 of your last 5 games.
+          Want a puzzle on it?
+        </p>
+      </CoachCard>
     </div>
   );
 }

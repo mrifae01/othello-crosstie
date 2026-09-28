@@ -8,8 +8,8 @@ import {
   type ExplainMoveResponse,
   type Move,
 } from '@othello/shared';
-import { GameError } from '../game/GameService';
-import { CoachCallError, type CoachService } from './CoachService';
+import { AppError } from '../errors';
+import type { Claude } from './claude';
 import { EXPLAIN_PROMPT_VERSION, writeExplanation } from './explain';
 import { ClaudeCallLimiter } from './rateLimit';
 
@@ -17,7 +17,7 @@ import { ClaudeCallLimiter } from './rateLimit';
 const MAX_LINE = 128;
 /** Explanations kept in memory (oldest dropped first). The same mistakes recur across players. */
 const CACHE_SIZE = 1000;
-/** New explanations (cache misses) per client IP per window, and for the whole server per hour. */
+/** New explanations (cache misses) per client IP per hour (~1.5–2 fully explained games), and for the whole server. */
 const PER_IP = { max: 50, windowMs: 60 * 60_000 };
 const GLOBAL = { max: 600, windowMs: 60 * 60_000 };
 
@@ -32,25 +32,24 @@ export class ExplainService {
   private readonly inFlight = new Map<string, Promise<ExplainMoveResponse>>();
   private readonly limiter = new ClaudeCallLimiter(PER_IP, GLOBAL);
 
-  constructor(private readonly coach: CoachService) {}
+  constructor(private readonly claude: Claude) {}
 
   /** POST /api/coach/explain */
   async explain(body: unknown, clientIp: string): Promise<ExplainMoveResponse> {
     const line = parseLine(body);
-    const claude = this.coach.claude;
-    const key = `${positionKey(line)}:${EXPLAIN_PROMPT_VERSION}:${claude?.model ?? ''}`;
+    const key = `${positionKey(line)}:${EXPLAIN_PROMPT_VERSION}:${this.claude.model}`;
 
     const cached = this.cache.get(key);
     if (cached) return cached;
     const running = this.inFlight.get(key);
     if (running) return running;
 
-    if (!claude || !this.coach.enabled) throw new GameError('COACH_UNAVAILABLE', 'The AI coach is unavailable right now');
+    if (!this.claude.enabled) throw new AppError('COACH_UNAVAILABLE', 'The AI coach is unavailable right now');
     if (!this.limiter.allow(clientIp)) {
-      throw new GameError('RATE_LIMITED', 'Too many explanations requested. Try again in a few minutes.');
+      throw new AppError('RATE_LIMITED', 'Too many explanations requested. Try again in a few minutes.');
     }
 
-    const run = this.create(line, claude.client, claude.model).finally(() => this.inFlight.delete(key));
+    const run = this.create(line).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, run);
     const result = await run;
     this.cache.set(key, result);
@@ -58,7 +57,7 @@ export class ExplainService {
     return result;
   }
 
-  private async create(line: Move[], client: NonNullable<CoachService['claude']>['client'], model: string): Promise<ExplainMoveResponse> {
+  private async create(line: Move[]): Promise<ExplainMoveResponse> {
     const ply = line.length;
     const { player, square } = line[ply - 1];
     const before = replayChecked(line.slice(0, -1)).board;
@@ -67,17 +66,12 @@ export class ExplainService {
 
     const t0 = Date.now();
     const label = `ply ${ply} ${facts.played}`;
-    try {
-      const written = await writeExplanation(client, model, facts, label);
-      console.log(
-        `[coach] explain ${label} (${grade.classification}): ` +
-          `${written.usage.inputTokens} in / ${written.usage.outputTokens} out, ${((Date.now() - t0) / 1000).toFixed(1)}s`,
-      );
-      return { grade, explanation: written.explanation, model: written.model };
-    } catch (err) {
-      if (err instanceof CoachCallError) this.coach.pauseAfter(err);
-      throw err;
-    }
+    const written = await writeExplanation(this.claude, facts, label);
+    console.log(
+      `[coach] explain ${label} (${grade.classification}): ` +
+        `${written.usage.inputTokens} in / ${written.usage.outputTokens} out, ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+    );
+    return { grade, explanation: written.explanation, model: written.model };
   }
 }
 
@@ -88,25 +82,25 @@ export class ExplainService {
 export function parseLine(body: unknown): Move[] {
   const { moves, ply } = (body ?? {}) as { moves?: unknown; ply?: unknown };
   if (!Array.isArray(moves) || moves.length === 0 || moves.length > MAX_LINE) {
-    throw new GameError('BAD_REQUEST', `\`moves\` must be an array of 1..${MAX_LINE} moves`);
+    throw new AppError('BAD_REQUEST', `\`moves\` must be an array of 1..${MAX_LINE} moves`);
   }
   if (typeof ply !== 'number' || !Number.isInteger(ply) || ply < 1 || ply > moves.length) {
-    throw new GameError('BAD_REQUEST', '`ply` must be an integer within `moves`');
+    throw new AppError('BAD_REQUEST', '`ply` must be an integer within `moves`');
   }
   // Rebuild each move from its two fields, so nothing else the client sent travels any further.
   const line: Move[] = moves.slice(0, ply).map((m: unknown) => {
     const { player, square } = (m ?? {}) as { player?: unknown; square?: unknown };
-    if (player !== 'B' && player !== 'W') throw new GameError('BAD_REQUEST', "Each move's `player` must be 'B' or 'W'");
+    if (player !== 'B' && player !== 'W') throw new AppError('BAD_REQUEST', "Each move's `player` must be 'B' or 'W'");
     if (square !== null && !(typeof square === 'number' && Number.isInteger(square) && square >= 0 && square < 64)) {
-      throw new GameError('BAD_REQUEST', "Each move's `square` must be 0..63 or null");
+      throw new AppError('BAD_REQUEST', "Each move's `square` must be 0..63 or null");
     }
     return { player, square };
   });
-  if (line[ply - 1].square === null) throw new GameError('BAD_REQUEST', 'A pass has nothing to explain');
+  if (line[ply - 1].square === null) throw new AppError('BAD_REQUEST', 'A pass has nothing to explain');
   try {
     replayChecked(line);
   } catch (err) {
-    throw new GameError('ILLEGAL_MOVE', (err as Error).message);
+    throw new AppError('ILLEGAL_MOVE', (err as Error).message);
   }
   return line;
 }

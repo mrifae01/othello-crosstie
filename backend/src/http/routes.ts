@@ -25,8 +25,9 @@ import { authEnabled, verifyAccessToken, type AuthUser } from '../auth/verifyTok
 import type { AnalysisRunner } from '../analysis/AnalysisRunner';
 import type { CoachService } from '../coach/CoachService';
 import type { ExplainService } from '../coach/ExplainService';
-import { GameError, toGameSummary, type GameService } from '../game/GameService';
+import { toGameSummary, type GameService } from '../game/GameService';
 import type { TournamentService } from '../tournament/TournamentService';
+import { AppError } from '../errors';
 
 const STATUS_FOR: Record<ErrorCode, number> = {
   BAD_REQUEST: 400,
@@ -59,10 +60,10 @@ function sendError(res: Response, code: ErrorCode, message: string): void {
 /** Trimmed display name, 1..24 characters; throws BAD_REQUEST otherwise. */
 function parseName(body: unknown): string {
   const raw = (body as { name?: unknown } | null)?.name;
-  if (typeof raw !== 'string') throw new GameError('BAD_REQUEST', '`name` must be a string');
+  if (typeof raw !== 'string') throw new AppError('BAD_REQUEST', '`name` must be a string');
   const name = raw.trim();
   const len = [...name].length;
-  if (len < 1 || len > 24) throw new GameError('BAD_REQUEST', '`name` must be 1–24 characters after trimming');
+  if (len < 1 || len > 24) throw new AppError('BAD_REQUEST', '`name` must be 1–24 characters after trimming');
   return name;
 }
 
@@ -72,7 +73,7 @@ function parseUsername(body: unknown): string {
   const raw = (body as { username?: unknown } | null)?.username;
   const username = typeof raw === 'string' ? raw.trim() : '';
   if (!USERNAME_RE.test(username)) {
-    throw new GameError('BAD_REQUEST', '`username` must be 3–20 letters, digits or underscores');
+    throw new AppError('BAD_REQUEST', '`username` must be 3–20 letters, digits or underscores');
   }
   return username;
 }
@@ -81,7 +82,7 @@ function parseLimit(limit: unknown, fallback = 20): number {
   if (limit === undefined) return fallback;
   const n = Number(limit);
   if (typeof limit !== 'string' || !Number.isInteger(n) || n < 1) {
-    throw new GameError('BAD_REQUEST', '`limit` must be a positive integer');
+    throw new AppError('BAD_REQUEST', '`limit` must be a positive integer');
   }
   return Math.min(n, 50);
 }
@@ -93,16 +94,16 @@ function parseLimit(limit: unknown, fallback = 20): number {
 async function optionalUser(req: Request): Promise<AuthUser | null> {
   const header = req.headers.authorization;
   if (!header) return null;
-  if (!authEnabled) throw new GameError('UNAUTHORIZED', 'Accounts are not enabled on this server');
+  if (!authEnabled) throw new AppError('UNAUTHORIZED', 'Accounts are not enabled on this server');
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   const user = token ? await verifyAccessToken(token) : null;
-  if (!user) throw new GameError('UNAUTHORIZED', 'Invalid or expired session; sign in again');
+  if (!user) throw new AppError('UNAUTHORIZED', 'Invalid or expired session; sign in again');
   return user;
 }
 
 async function requireUser(req: Request): Promise<AuthUser> {
   const user = await optionalUser(req);
-  if (!user) throw new GameError('UNAUTHORIZED', 'Sign in required');
+  if (!user) throw new AppError('UNAUTHORIZED', 'Sign in required');
   return user;
 }
 
@@ -121,7 +122,7 @@ async function seatHolderFor(req: Request): Promise<SeatHolder> {
 async function requireAccount(req: Request): Promise<Account> {
   const user = await requireUser(req);
   const account = await getAccount(user.userId);
-  if (!account) throw new GameError('UNAUTHORIZED', 'Pick a username first');
+  if (!account) throw new AppError('UNAUTHORIZED', 'Pick a username first');
   return account;
 }
 
@@ -129,7 +130,7 @@ function parseTournamentName(body: unknown): string {
   const raw = (body as { name?: unknown } | null)?.name;
   const name = typeof raw === 'string' ? raw.trim() : '';
   const len = [...name].length;
-  if (len < 1 || len > 40) throw new GameError('BAD_REQUEST', '`name` must be 1–40 characters after trimming');
+  if (len < 1 || len > 40) throw new AppError('BAD_REQUEST', '`name` must be 1–40 characters after trimming');
   return name;
 }
 
@@ -137,7 +138,7 @@ function parseMaxPlayers(body: unknown): number {
   const raw = (body as { maxPlayers?: unknown } | null)?.maxPlayers;
   if (raw === undefined) return MAX_TOURNAMENT_PLAYERS;
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < MIN_TOURNAMENT_PLAYERS || raw > MAX_TOURNAMENT_PLAYERS) {
-    throw new GameError('BAD_REQUEST', `\`maxPlayers\` must be an integer ${MIN_TOURNAMENT_PLAYERS}–${MAX_TOURNAMENT_PLAYERS}`);
+    throw new AppError('BAD_REQUEST', `\`maxPlayers\` must be an integer ${MIN_TOURNAMENT_PLAYERS}–${MAX_TOURNAMENT_PLAYERS}`);
   }
   return raw;
 }
@@ -146,13 +147,13 @@ function parseMatchRef(params: Record<string, string>): { round: number; slot: n
   const round = Number(params.round);
   const slot = Number(params.slot);
   if (!Number.isInteger(round) || round < 1 || !Number.isInteger(slot) || slot < 0) {
-    throw new GameError('BAD_REQUEST', 'Bad match reference');
+    throw new AppError('BAD_REQUEST', 'Bad match reference');
   }
   return { round, slot };
 }
 
 function parsePlayer(raw: unknown): Player {
-  if (raw !== 'B' && raw !== 'W') throw new GameError('BAD_REQUEST', "`player` must be 'B' or 'W'");
+  if (raw !== 'B' && raw !== 'W') throw new AppError('BAD_REQUEST', "`player` must be 'B' or 'W'");
   return raw;
 }
 
@@ -188,7 +189,7 @@ export function apiRouter(
   r.get('/games', wrap(async (req, res) => {
     const { status, limit } = req.query;
     if (status !== undefined && !GAME_STATUSES.includes(status as GameStatus)) {
-      throw new GameError('BAD_REQUEST', '`status` must be one of waiting, active, finished');
+      throw new AppError('BAD_REQUEST', '`status` must be one of waiting, active, finished');
     }
     const rows = await listGames({ status: status as GameStatus | undefined, limit: parseLimit(limit) });
     const body: ListGamesResponse = { games: rows.map(toGameSummary) };
@@ -250,7 +251,7 @@ export function apiRouter(
   r.put('/me', wrap(async (req, res) => {
     const user = await requireUser(req);
     const account = await upsertAccount(user.userId, parseUsername(req.body));
-    if (!account) throw new GameError('USERNAME_TAKEN', 'That username is taken');
+    if (!account) throw new AppError('USERNAME_TAKEN', 'That username is taken');
     const body: MeResponse = { account };
     res.json(body);
   }));
@@ -268,7 +269,7 @@ export function apiRouter(
   r.get('/tournaments', wrap(async (req, res) => {
     const { status, limit } = req.query;
     if (status !== undefined && !TOURNAMENT_STATUSES.includes(status as TournamentStatus)) {
-      throw new GameError('BAD_REQUEST', '`status` must be one of registering, active, finished, cancelled');
+      throw new AppError('BAD_REQUEST', '`status` must be one of registering, active, finished, cancelled');
     }
     const list = await tournaments.list({ status: status as TournamentStatus | undefined, limit: parseLimit(limit) });
     const body: ListTournamentsResponse = { tournaments: list };
@@ -310,16 +311,16 @@ export function apiRouter(
     const account = await requireAccount(req);
     const { round, slot } = parseMatchRef(req.params);
     const loser = (req.body as Partial<ForfeitRequest> | null)?.loser;
-    if (loser !== 'B' && loser !== 'W') throw new GameError('BAD_REQUEST', "`loser` must be 'B' or 'W'");
+    if (loser !== 'B' && loser !== 'W') throw new AppError('BAD_REQUEST', "`loser` must be 'B' or 'W'");
     const body: TournamentDetail = await tournaments.forfeit(req.params.id, account, round, slot, loser);
     res.json(body);
   }));
 
   r.use((_req, res) => sendError(res, 'BAD_REQUEST', 'Unknown API endpoint'));
 
-  // Error mapping: GameError → its code; malformed JSON → BAD_REQUEST; anything else → INTERNAL.
+  // Error mapping: AppError → its code; malformed JSON → BAD_REQUEST; anything else → INTERNAL.
   r.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (err instanceof GameError) return sendError(res, err.code, err.message);
+    if (err instanceof AppError) return sendError(res, err.code, err.message);
     const e = err as { type?: string; status?: number; message?: string };
     if (e?.type === 'entity.parse.failed' || e?.status === 400) return sendError(res, 'BAD_REQUEST', 'Malformed JSON body');
     if (e?.type === 'entity.too.large') return sendError(res, 'BAD_REQUEST', 'Request body too large');

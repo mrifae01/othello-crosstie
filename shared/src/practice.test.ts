@@ -4,13 +4,11 @@ import { gradeMove } from './engine/analyze';
 import { seededRng } from './engine/bot';
 import { getLegalMoves } from './engine/rules';
 import { search } from './engine/search';
+import { positionKey, replay, replayChecked } from './line';
 import {
   isReplyPending,
   newPracticeState,
-  positionKey,
   practiceReducer,
-  replay,
-  replayChecked,
   REPLY_DELAY_MS,
   type PracticeAction,
   type PracticeState,
